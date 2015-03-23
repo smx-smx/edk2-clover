@@ -4,7 +4,7 @@ compiler:
 before_install:
   - git submodule update --init --recursive
   - sudo apt-get update -qq
-  - sudo apt-get install -qq build-essential subversion uuid-dev iasl
+  - sudo apt-get install -qq build-essential subversion uuid-dev iasl nasm
 script:
   - make -C BaseTools
   - export EDK_TOOLS_PATH=$(pwd -P)/BaseTools
