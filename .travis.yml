@@ -17,6 +17,6 @@ script:
   - export EDK_TOOLS_PATH=$(pwd -P)/BaseTools
   - . edksetup.sh BaseTools
   - sed 's/^ACTIVE_PLATFORM.*/ACTIVE_PLATFORM=Clover\/Clover.dsc/g' -i $WORKSPACE/Conf/target.txt
-  - sed 's/^TOOL_CHAIN_TAG.*/TOOL_CHAIN_TAG=GCC46/g' -i $WORKSPACE/Conf/target.txt
+  - sed 's/^TOOL_CHAIN_TAG.*/TOOL_CHAIN_TAG=GCC49/g' -i $WORKSPACE/Conf/target.txt
   - sed 's/^TARGET_ARCH.*/TARGET_ARCH=IA32 X64/g' -i $WORKSPACE/Conf/target.txt
   - build
