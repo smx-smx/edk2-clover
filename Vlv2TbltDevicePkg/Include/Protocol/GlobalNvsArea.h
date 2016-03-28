@@ -1,6 +1,6 @@
 /*++
 
-  Copyright (c) 2004  - 2014, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2004  - 2015, Intel Corporation. All rights reserved.<BR>
                                                                                    
 
   This program and the accompanying materials are licensed and made available under
@@ -104,7 +104,7 @@ typedef struct {
   UINT8       PassiveTc2Value;                            // 23
   UINT8       PassiveTspValue;                            // 24
   UINT8       CriticalThermalTripPoint;                   // 25
-  UINT8       ReserveD;
+  UINT8       EnableDigitalThermalSensor;                 // 26
   UINT8       BspDigitalThermalSensorTemperature;         // 27   Temperature of BSP
   UINT8       ApDigitalThermalSensorTemperature;          // 28   Temperature of AP
   UINT8       DigitalThermalSensorSmiFunction;            // 29   SMI function call via DTS IO Trap
@@ -471,6 +471,7 @@ typedef struct {
   UINT8       EDPV;                              // 792 Check for eDP display device
   UINT32      DIDX;                              // 793 Device ID for eDP device
   UINT8       MicrosoftIoT;                      // (794)JP1 pins are for Microsoft IoT project.
+  UINT8       RtcBattery;                        // (795) The Flag of RTC Battery Present.
 } EFI_GLOBAL_NVS_AREA;
 #pragma pack ()
 

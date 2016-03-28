@@ -22,6 +22,7 @@
 //
 // The Library classes this module consumes
 //
+#include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/HobLib.h>
 #include <Library/IoLib.h>
@@ -61,6 +62,8 @@ EFI_PEI_PPI_DESCRIPTOR   mPpiBootMode[] = {
 };
 
 
+UINT16 mHostBridgeDevId;
+
 EFI_BOOT_MODE mBootMode = BOOT_WITH_FULL_CONFIGURATION;
 
 BOOLEAN mS3Supported = FALSE;
@@ -86,7 +89,8 @@ AddIoMemoryBaseSizeHob (
 VOID
 AddReservedMemoryBaseSizeHob (
   EFI_PHYSICAL_ADDRESS        MemoryBase,
-  UINT64                      MemorySize
+  UINT64                      MemorySize,
+  BOOLEAN                     Cacheable
   )
 {
   BuildResourceDescriptorHob (
@@ -94,6 +98,12 @@ AddReservedMemoryBaseSizeHob (
       EFI_RESOURCE_ATTRIBUTE_PRESENT     |
       EFI_RESOURCE_ATTRIBUTE_INITIALIZED |
       EFI_RESOURCE_ATTRIBUTE_UNCACHEABLE |
+      (Cacheable ?
+       EFI_RESOURCE_ATTRIBUTE_WRITE_COMBINEABLE |
+       EFI_RESOURCE_ATTRIBUTE_WRITE_THROUGH_CACHEABLE |
+       EFI_RESOURCE_ATTRIBUTE_WRITE_BACK_CACHEABLE :
+       0
+       ) |
       EFI_RESOURCE_ATTRIBUTE_TESTED,
     MemoryBase,
     MemorySize
@@ -191,8 +201,8 @@ MemMapInitialization (
     EFI_RESOURCE_IO,
     EFI_RESOURCE_ATTRIBUTE_PRESENT     |
     EFI_RESOURCE_ATTRIBUTE_INITIALIZED,
-    0xC000,
-    0x4000
+    PcdGet64 (PcdPciIoBase),
+    PcdGet64 (PcdPciIoSize)
     );
 
   //
@@ -202,7 +212,24 @@ MemMapInitialization (
 
   if (!mXen) {
     UINT32  TopOfLowRam;
+    UINT64  PciExBarBase;
+    UINT32  PciBase;
+    UINT32  PciSize;
+
     TopOfLowRam = GetSystemMemorySizeBelow4gb ();
+    PciExBarBase = 0;
+    if (mHostBridgeDevId == INTEL_Q35_MCH_DEVICE_ID) {
+      //
+      // The MMCONFIG area is expected to fall between the top of low RAM and
+      // the base of the 32-bit PCI host aperture.
+      //
+      PciExBarBase = FixedPcdGet64 (PcdPciExpressBaseAddress);
+      ASSERT (TopOfLowRam <= PciExBarBase);
+      ASSERT (PciExBarBase <= MAX_UINT32 - SIZE_256MB);
+      PciBase = (UINT32)(PciExBarBase + SIZE_256MB);
+    } else {
+      PciBase = (TopOfLowRam < BASE_2GB) ? BASE_2GB : TopOfLowRam;
+    }
 
     //
     // address       purpose   size
@@ -212,27 +239,161 @@ MemMapInitialization (
     // 0xFEC00000    IO-APIC                        4 KB
     // 0xFEC01000    gap                         1020 KB
     // 0xFED00000    HPET                           1 KB
-    // 0xFED00400    gap                         1023 KB
+    // 0xFED00400    gap                          111 KB
+    // 0xFED1C000    gap (PIIX4) / RCRB (ICH9)     16 KB
+    // 0xFED20000    gap                          896 KB
     // 0xFEE00000    LAPIC                          1 MB
     //
-    AddIoMemoryRangeHob (TopOfLowRam < BASE_2GB ?
-                         BASE_2GB : TopOfLowRam, 0xFC000000);
+    PciSize = 0xFC000000 - PciBase;
+    AddIoMemoryBaseSizeHob (PciBase, PciSize);
+    PcdSet64 (PcdPciMmio32Base, PciBase);
+    PcdSet64 (PcdPciMmio32Size, PciSize);
     AddIoMemoryBaseSizeHob (0xFEC00000, SIZE_4KB);
     AddIoMemoryBaseSizeHob (0xFED00000, SIZE_1KB);
+    if (mHostBridgeDevId == INTEL_Q35_MCH_DEVICE_ID) {
+      AddIoMemoryBaseSizeHob (ICH9_ROOT_COMPLEX_BASE, SIZE_16KB);
+      //
+      // Note: there should be an
+      //
+      //   AddIoMemoryBaseSizeHob (PciExBarBase, SIZE_256MB);
+      //
+      // call below, just like the one above for RCBA. However, Linux insists
+      // that the MMCONFIG area be marked in the E820 or UEFI memory map as
+      // "reserved memory" -- Linux does not content itself with a simple gap
+      // in the memory map wherever the MCFG ACPI table points to.
+      //
+      // This appears to be a safety measure. The PCI Firmware Specification
+      // (rev 3.1) says in 4.1.2. "MCFG Table Description": "The resources can
+      // *optionally* be returned in [...] EFIGetMemoryMap as reserved memory
+      // [...]". (Emphasis added here.)
+      //
+      // Normally we add memory resource descriptor HOBs in
+      // QemuInitializeRam(), and pre-allocate from those with memory
+      // allocation HOBs in InitializeRamRegions(). However, the MMCONFIG area
+      // is most definitely not RAM; so, as an exception, cover it with
+      // uncacheable reserved memory right here.
+      //
+      AddReservedMemoryBaseSizeHob (PciExBarBase, SIZE_256MB, FALSE);
+      BuildMemoryAllocationHob (PciExBarBase, SIZE_256MB,
+        EfiReservedMemoryType);
+    }
     AddIoMemoryBaseSizeHob (PcdGet32(PcdCpuLocalApicBaseAddress), SIZE_1MB);
   }
 }
 
+EFI_STATUS
+GetNamedFwCfgBoolean (
+  IN  CHAR8   *FwCfgFileName,
+  OUT BOOLEAN *Setting
+  )
+{
+  EFI_STATUS           Status;
+  FIRMWARE_CONFIG_ITEM FwCfgItem;
+  UINTN                FwCfgSize;
+  UINT8                Value[3];
+
+  Status = QemuFwCfgFindFile (FwCfgFileName, &FwCfgItem, &FwCfgSize);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+  if (FwCfgSize > sizeof Value) {
+    return EFI_BAD_BUFFER_SIZE;
+  }
+  QemuFwCfgSelectItem (FwCfgItem);
+  QemuFwCfgReadBytes (FwCfgSize, Value);
+
+  if ((FwCfgSize == 1) ||
+      (FwCfgSize == 2 && Value[1] == '\n') ||
+      (FwCfgSize == 3 && Value[1] == '\r' && Value[2] == '\n')) {
+    switch (Value[0]) {
+      case '0':
+      case 'n':
+      case 'N':
+        *Setting = FALSE;
+        return EFI_SUCCESS;
+
+      case '1':
+      case 'y':
+      case 'Y':
+        *Setting = TRUE;
+        return EFI_SUCCESS;
+
+      default:
+        break;
+    }
+  }
+  return EFI_PROTOCOL_ERROR;
+}
+
+#define UPDATE_BOOLEAN_PCD_FROM_FW_CFG(TokenName)                   \
+          do {                                                      \
+            BOOLEAN Setting;                                        \
+                                                                    \
+            if (!EFI_ERROR (GetNamedFwCfgBoolean (                  \
+                              "opt/ovmf/" #TokenName, &Setting))) { \
+              PcdSetBool (TokenName, Setting);                      \
+            }                                                       \
+          } while (0)
+
+VOID
+NoexecDxeInitialization (
+  VOID
+  )
+{
+  UPDATE_BOOLEAN_PCD_FROM_FW_CFG (PcdPropertiesTableEnable);
+  UPDATE_BOOLEAN_PCD_FROM_FW_CFG (PcdSetNxForStack);
+}
+
+VOID
+PciExBarInitialization (
+  VOID
+  )
+{
+  union {
+    UINT64 Uint64;
+    UINT32 Uint32[2];
+  } PciExBarBase;
+
+  //
+  // We only support the 256MB size for the MMCONFIG area:
+  // 256 buses * 32 devices * 8 functions * 4096 bytes config space.
+  //
+  // The masks used below enforce the Q35 requirements that the MMCONFIG area
+  // be (a) correctly aligned -- here at 256 MB --, (b) located under 64 GB.
+  //
+  // Note that (b) also ensures that the minimum address width we have
+  // determined in AddressWidthInitialization(), i.e., 36 bits, will suffice
+  // for DXE's page tables to cover the MMCONFIG area.
+  //
+  PciExBarBase.Uint64 = FixedPcdGet64 (PcdPciExpressBaseAddress);
+  ASSERT ((PciExBarBase.Uint32[1] & MCH_PCIEXBAR_HIGHMASK) == 0);
+  ASSERT ((PciExBarBase.Uint32[0] & MCH_PCIEXBAR_LOWMASK) == 0);
+
+  //
+  // Clear the PCIEXBAREN bit first, before programming the high register.
+  //
+  PciWrite32 (DRAMC_REGISTER_Q35 (MCH_PCIEXBAR_LOW), 0);
+
+  //
+  // Program the high register. Then program the low register, setting the
+  // MMCONFIG area size and enabling decoding at once.
+  //
+  PciWrite32 (DRAMC_REGISTER_Q35 (MCH_PCIEXBAR_HIGH), PciExBarBase.Uint32[1]);
+  PciWrite32 (
+    DRAMC_REGISTER_Q35 (MCH_PCIEXBAR_LOW),
+    PciExBarBase.Uint32[0] | MCH_PCIEXBAR_BUS_FF | MCH_PCIEXBAR_EN
+    );
+}
 
 VOID
 MiscInitialization (
   VOID
   )
 {
-  UINT16 HostBridgeDevId;
   UINTN  PmCmd;
   UINTN  Pmba;
-  UINTN  PmRegMisc;
+  UINTN  AcpiCtlReg;
+  UINT8  AcpiEnBit;
 
   //
   // Disable A20 Mask
@@ -240,41 +401,44 @@ MiscInitialization (
   IoOr8 (0x92, BIT1);
 
   //
-  // Build the CPU hob with 36-bit addressing and 16-bits of IO space.
+  // Build the CPU HOB with guest RAM size dependent address width and 16-bits
+  // of IO space. (Side note: unlike other HOBs, the CPU HOB is needed during
+  // S3 resume as well, so we build it unconditionally.)
   //
-  BuildCpuHob (36, 16);
+  BuildCpuHob (mPhysMemAddressWidth, 16);
 
   //
-  // Query Host Bridge DID to determine platform type and save to PCD
+  // Determine platform type and save Host Bridge DID to PCD
   //
-  HostBridgeDevId = PciRead16 (OVMF_HOSTBRIDGE_DID);
-  switch (HostBridgeDevId) {
+  switch (mHostBridgeDevId) {
     case INTEL_82441_DEVICE_ID:
-      PmCmd     = POWER_MGMT_REGISTER_PIIX4 (PCI_COMMAND_OFFSET);
-      Pmba      = POWER_MGMT_REGISTER_PIIX4 (0x40);
-      PmRegMisc = POWER_MGMT_REGISTER_PIIX4 (0x80);
+      PmCmd      = POWER_MGMT_REGISTER_PIIX4 (PCI_COMMAND_OFFSET);
+      Pmba       = POWER_MGMT_REGISTER_PIIX4 (PIIX4_PMBA);
+      AcpiCtlReg = POWER_MGMT_REGISTER_PIIX4 (PIIX4_PMREGMISC);
+      AcpiEnBit  = PIIX4_PMREGMISC_PMIOSE;
       break;
     case INTEL_Q35_MCH_DEVICE_ID:
-      PmCmd     = POWER_MGMT_REGISTER_Q35 (PCI_COMMAND_OFFSET);
-      Pmba      = POWER_MGMT_REGISTER_Q35 (0x40);
-      PmRegMisc = POWER_MGMT_REGISTER_Q35 (0x80);
+      PmCmd      = POWER_MGMT_REGISTER_Q35 (PCI_COMMAND_OFFSET);
+      Pmba       = POWER_MGMT_REGISTER_Q35 (ICH9_PMBASE);
+      AcpiCtlReg = POWER_MGMT_REGISTER_Q35 (ICH9_ACPI_CNTL);
+      AcpiEnBit  = ICH9_ACPI_CNTL_ACPI_EN;
       break;
     default:
       DEBUG ((EFI_D_ERROR, "%a: Unknown Host Bridge Device ID: 0x%04x\n",
-        __FUNCTION__, HostBridgeDevId));
+        __FUNCTION__, mHostBridgeDevId));
       ASSERT (FALSE);
       return;
   }
-  PcdSet16 (PcdOvmfHostBridgePciDevId, HostBridgeDevId);
+  PcdSet16 (PcdOvmfHostBridgePciDevId, mHostBridgeDevId);
 
   //
-  // If PMREGMISC/PMIOSE is set, assume the ACPI PMBA has been configured (for
-  // example by Xen) and skip the setup here. This matches the logic in
-  // AcpiTimerLibConstructor ().
+  // If the appropriate IOspace enable bit is set, assume the ACPI PMBA
+  // has been configured (e.g., by Xen) and skip the setup here.
+  // This matches the logic in AcpiTimerLibConstructor ().
   //
-  if ((PciRead8 (PmRegMisc) & 0x01) == 0) {
+  if ((PciRead8 (AcpiCtlReg) & AcpiEnBit) == 0) {
     //
-    // The PEI phase should be exited with fully accessibe PIIX4 IO space:
+    // The PEI phase should be exited with fully accessibe ACPI PM IO space:
     // 1. set PMBA
     //
     PciAndThenOr32 (Pmba, (UINT32) ~0xFFC0, PcdGet16 (PcdAcpiPmBaseAddress));
@@ -285,9 +449,24 @@ MiscInitialization (
     PciOr8 (PmCmd, EFI_PCI_COMMAND_IO_SPACE);
 
     //
-    // 3. set PMREGMISC/PMIOSE
+    // 3. set ACPI PM IO enable bit (PMREGMISC:PMIOSE or ACPI_CNTL:ACPI_EN)
     //
-    PciOr8 (PmRegMisc, 0x01);
+    PciOr8 (AcpiCtlReg, AcpiEnBit);
+  }
+
+  if (mHostBridgeDevId == INTEL_Q35_MCH_DEVICE_ID) {
+    //
+    // Set Root Complex Register Block BAR
+    //
+    PciWrite32 (
+      POWER_MGMT_REGISTER_Q35 (ICH9_RCBA),
+      ICH9_ROOT_COMPLEX_BASE | ICH9_RCBA_EN
+      );
+
+    //
+    // Set PCI Express Register Range Base Address
+    //
+    PciExBarInitialization ();
   }
 }
 
@@ -302,6 +481,7 @@ BootModeInitialization (
   if (CmosRead8 (0xF) == 0xFE) {
     mBootMode = BOOT_ON_S3_RESUME;
   }
+  CmosWrite8 (0xF, 0x00);
 
   Status = PeiServicesSetBootMode (mBootMode);
   ASSERT_EFI_ERROR (Status);
@@ -343,7 +523,7 @@ DebugDumpCmos (
   VOID
   )
 {
-  UINTN  Loop;
+  UINT32 Loop;
 
   DEBUG ((EFI_D_INFO, "CMOS:\n"));
 
@@ -356,6 +536,27 @@ DebugDumpCmos (
       DEBUG ((EFI_D_INFO, "\n"));
     }
   }
+}
+
+
+VOID
+S3Verification (
+  VOID
+  )
+{
+#if defined (MDE_CPU_X64)
+  if (FeaturePcdGet (PcdSmmSmramRequire) && mS3Supported) {
+    DEBUG ((EFI_D_ERROR,
+      "%a: S3Resume2Pei doesn't support X64 PEI + SMM yet.\n", __FUNCTION__));
+    DEBUG ((EFI_D_ERROR,
+      "%a: Please disable S3 on the QEMU command line (see the README),\n",
+      __FUNCTION__));
+    DEBUG ((EFI_D_ERROR,
+      "%a: or build OVMF with \"OvmfPkgIa32X64.dsc\".\n", __FUNCTION__));
+    ASSERT (FALSE);
+    CpuDeadLoop ();
+  }
+#endif
 }
 
 
@@ -386,7 +587,9 @@ InitializePlatform (
     mS3Supported = TRUE;
   }
 
+  S3Verification ();
   BootModeInitialization ();
+  AddressWidthInitialization ();
 
   PublishPeiMemory ();
 
@@ -397,12 +600,16 @@ InitializePlatform (
     InitializeXen ();
   }
 
+  //
+  // Query Host Bridge DID
+  //
+  mHostBridgeDevId = PciRead16 (OVMF_HOSTBRIDGE_DID);
+
   if (mBootMode != BOOT_ON_S3_RESUME) {
     ReserveEmuVariableNvStore ();
-
     PeiFvInitialization ();
-
     MemMapInitialization ();
+    NoexecDxeInitialization ();
   }
 
   MiscInitialization ();

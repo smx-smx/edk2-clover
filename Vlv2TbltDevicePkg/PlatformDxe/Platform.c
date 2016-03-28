@@ -49,6 +49,8 @@ Abstract:
 #include <Protocol/GlobalNvsArea.h>
 #include <Protocol/IgdOpRegion.h>
 #include <Library/PcdLib.h>
+#include <Protocol/VariableLock.h>
+
 
 //
 // VLV2 GPIO GROUP OFFSET
@@ -198,6 +200,82 @@ VOID
 InitRC6Policy(
   VOID
   );
+
+
+EFI_STATUS
+EFIAPI
+SaveSetupRecoveryVar(
+  VOID
+  )
+{
+  EFI_STATUS                   Status = EFI_SUCCESS;
+  UINTN                        SizeOfNvStore = 0;
+  UINTN                        SizeOfSetupVar = 0;
+  SYSTEM_CONFIGURATION         *SetupData = NULL;
+  SYSTEM_CONFIGURATION         *RecoveryNvData = NULL;
+  EDKII_VARIABLE_LOCK_PROTOCOL *VariableLock = NULL;
+
+
+  DEBUG ((EFI_D_INFO, "SaveSetupRecoveryVar() Entry \n"));
+  SizeOfNvStore = sizeof(SYSTEM_CONFIGURATION);
+  RecoveryNvData = AllocateZeroPool (sizeof(SYSTEM_CONFIGURATION));
+  if (NULL == RecoveryNvData) {
+    Status = EFI_OUT_OF_RESOURCES;
+    goto Exit; 
+  }
+  
+  Status = gRT->GetVariable(
+                L"SetupRecovery",
+                &gEfiNormalSetupGuid,
+                NULL,
+                &SizeOfNvStore,
+                RecoveryNvData
+                );
+  
+  if (EFI_ERROR (Status)) {
+    // Don't find the "SetupRecovery" variable.
+    // have to copy "Setup" variable to "SetupRecovery" variable.
+    SetupData = AllocateZeroPool (sizeof(SYSTEM_CONFIGURATION));
+    if (NULL == SetupData) {
+      Status = EFI_OUT_OF_RESOURCES;
+      goto Exit;      
+    }
+    SizeOfSetupVar = sizeof(SYSTEM_CONFIGURATION);
+    Status = gRT->GetVariable(
+                    NORMAL_SETUP_NAME,
+                    &gEfiNormalSetupGuid,
+                    NULL,
+                    &SizeOfSetupVar,
+                    SetupData
+                    );
+    ASSERT_EFI_ERROR (Status);
+    
+    Status = gRT->SetVariable (
+                    L"SetupRecovery",
+                    &gEfiNormalSetupGuid,
+                    EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS,
+                    sizeof(SYSTEM_CONFIGURATION),
+                    SetupData
+                    );
+    ASSERT_EFI_ERROR (Status);
+
+    Status = gBS->LocateProtocol (&gEdkiiVariableLockProtocolGuid, NULL, (VOID **) &VariableLock);
+      if (!EFI_ERROR (Status)) {
+        Status = VariableLock->RequestToLock (VariableLock, L"SetupRecovery", &gEfiNormalSetupGuid);
+        ASSERT_EFI_ERROR (Status);
+    }
+    
+  }
+
+Exit:
+  if (RecoveryNvData)
+    FreePool (RecoveryNvData);
+  if (SetupData)
+    FreePool (SetupData);
+  
+  return Status;
+    
+}
 
 
 VOID
@@ -353,12 +431,23 @@ SpiBiosProtectionFunction(
 {
 
   UINTN                             mPciD31F0RegBase;
-  UINTN                             BiosFlaLower = 0;
-  UINTN                             BiosFlaLimit = 0x7fffff;
+  UINTN                             BiosFlaLower0;
+  UINTN                             BiosFlaLimit0;
+  UINTN                             BiosFlaLower1;
+  UINTN                             BiosFlaLimit1;  
+  
 
-  BiosFlaLower = PcdGet32(PcdFlashMicroCodeAddress)-PcdGet32(PcdFlashAreaBaseAddress);
+  BiosFlaLower0 = PcdGet32(PcdFlashMicroCodeAddress)-PcdGet32(PcdFlashAreaBaseAddress);
+  BiosFlaLimit0 = PcdGet32(PcdFlashMicroCodeSize)-1;  
+  #ifdef MINNOW2_FSP_BUILD
+  BiosFlaLower1 = PcdGet32(PcdFlashFvFspBase)-PcdGet32(PcdFlashAreaBaseAddress);
+  BiosFlaLimit1 = (PcdGet32(PcdFlashFvRecoveryBase)-PcdGet32(PcdFlashFvFspBase)+PcdGet32(PcdFlashFvRecoverySize))-1;
+  #else
+  BiosFlaLower1 = PcdGet32(PcdFlashFvMainBase)-PcdGet32(PcdFlashAreaBaseAddress);
+  BiosFlaLimit1 = (PcdGet32(PcdFlashFvRecoveryBase)-PcdGet32(PcdFlashFvMainBase)+PcdGet32(PcdFlashFvRecoverySize))-1;
+  #endif
 
-
+  
   mPciD31F0RegBase = MmPciAddress (0,
                          DEFAULT_PCI_BUS_NUMBER_PCH,
                          PCI_DEVICE_NUMBER_PCH_LPC,
@@ -391,10 +480,18 @@ SpiBiosProtectionFunction(
   //
   MmioOr32((UINTN)(SpiBase + R_PCH_SPI_PR0),
     B_PCH_SPI_PR0_RPE|B_PCH_SPI_PR0_WPE|\
-    (B_PCH_SPI_PR0_PRB_MASK&(BiosFlaLower>>12))|(B_PCH_SPI_PR0_PRL_MASK&(BiosFlaLimit>>12)<<16));
+    (B_PCH_SPI_PR0_PRB_MASK&(BiosFlaLower0>>12))|(B_PCH_SPI_PR0_PRL_MASK&(BiosFlaLimit0>>12)<<16));
 
   //
-  //Lock down PR0
+  //Set PR1
+  //
+
+  MmioOr32((UINTN)(SpiBase + R_PCH_SPI_PR1),
+    B_PCH_SPI_PR1_RPE|B_PCH_SPI_PR1_WPE|\
+    (B_PCH_SPI_PR1_PRB_MASK&(BiosFlaLower1>>12))|(B_PCH_SPI_PR1_PRL_MASK&(BiosFlaLimit1>>12)<<16));
+
+  //
+  //Lock down PRx
   //
   MmioOr16 ((UINTN) (SpiBase + R_PCH_SPI_HSFS), (UINT16) (B_PCH_SPI_HSFS_FLOCKDN));
 
@@ -402,9 +499,8 @@ SpiBiosProtectionFunction(
   // Verify if it's really locked.
   //
   if ((MmioRead16 (SpiBase + R_PCH_SPI_HSFS) & B_PCH_SPI_HSFS_FLOCKDN) == 0) {
-    DEBUG((EFI_D_ERROR, "Failed to lock down PR0.\n"));
+    DEBUG((EFI_D_ERROR, "Failed to lock down PRx.\n"));
   }
-
   return;
 
 }
@@ -468,6 +564,32 @@ InitPciDevPME (
   }
 }
 
+VOID
+EFIAPI
+InitThermalZone (
+  EFI_EVENT  Event,
+  VOID       *Context
+  )
+{
+  UINTN                  VarSize;
+  EFI_STATUS             Status;
+  EFI_GLOBAL_NVS_AREA_PROTOCOL       *GlobalNvsArea;
+  VarSize = sizeof(SYSTEM_CONFIGURATION);
+  Status = gRT->GetVariable(
+                  NORMAL_SETUP_NAME,
+                  &gEfiNormalSetupGuid,
+                  NULL,
+                  &VarSize,
+                  &mSystemConfiguration
+                  );
+  Status = gBS->LocateProtocol (
+                  &gEfiGlobalNvsAreaProtocolGuid,
+                  NULL,
+                  (void **)&GlobalNvsArea
+                  );
+  GlobalNvsArea->Area->CriticalThermalTripPoint = mSystemConfiguration.CriticalThermalTripPoint;
+  GlobalNvsArea->Area->PassiveThermalTripPoint = mSystemConfiguration.PassiveThermalTripPoint;
+}
 #if defined SUPPORT_LVDS_DISPLAY && SUPPORT_LVDS_DISPLAY
 
 #endif
@@ -662,6 +784,10 @@ InitializePlatform (
   //
   InitializeObservableProtocol();
 
+  Status = SaveSetupRecoveryVar();
+  if (EFI_ERROR (Status)) {
+    DEBUG ((EFI_D_ERROR, "InitializePlatform() Save SetupRecovery variable failed \n"));
+  }
 
   VarSize = sizeof(SYSTEM_CONFIGURATION);
   Status = gRT->GetVariable(
@@ -671,8 +797,26 @@ InitializePlatform (
                   &VarSize,
                   &mSystemConfiguration
                   );
-
-
+  if (EFI_ERROR (Status) || VarSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VarSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = gRT->GetVariable(
+              L"SetupRecovery",
+              &gEfiNormalSetupGuid,
+              NULL,
+              &VarSize,
+              &mSystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+    Status = gRT->SetVariable (
+                    NORMAL_SETUP_NAME,
+                    &gEfiNormalSetupGuid,
+                    EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS,
+                    sizeof(SYSTEM_CONFIGURATION),
+                    &mSystemConfiguration
+                    );    
+  }
+    
   Status = EfiCreateEventReadyToBootEx (
              TPL_CALLBACK,
              ReadyToBootFunction,
@@ -690,7 +834,7 @@ InitializePlatform (
              &mReadyToBootEvent
              );
   //
-  // Create a ReadyToBoot Event to run enable PR0 and lock down
+  // Create a ReadyToBoot Event to run enable PR0/PR1 and lock down,unlock variable region
   //
   if(mSystemConfiguration.SpiRwProtect==1) {
     Status = EfiCreateEventReadyToBootEx (
@@ -700,7 +844,16 @@ InitializePlatform (
                &mReadyToBootEvent
                );
   }
-
+  //
+  // Create a ReadyToBoot Event to run the thermalzone init process
+  //
+  Status = EfiCreateEventReadyToBootEx (
+             TPL_CALLBACK,
+             InitThermalZone,
+             NULL,
+             &mReadyToBootEvent
+             );  
+ 
   ReportStatusCodeEx (
     EFI_PROGRESS_CODE,
     EFI_COMPUTING_UNIT_CHIPSET | EFI_CU_PLATFORM_DXE_STEP1,
@@ -1364,12 +1517,7 @@ InitMfgAndConfigModeStateVar()
 {
   EFI_PLATFORM_SETUP_ID           *BootModeBuffer;
   VOID                            *HobList;
-  UINT16                          State;
 
-  //
-  // Variable initialization
-  //
-  State = FALSE;
 
   HobList = GetFirstGuidHob(&gEfiPlatformBootModeGuid);
   if (HobList != NULL) {
@@ -1386,16 +1534,8 @@ InitMfgAndConfigModeStateVar()
         mMfgMode = TRUE;
       }
 
-      //
-      // Check if in safe mode
-      //
-      if ( !CompareMem (
-              &BootModeBuffer->SetupName,
-              SAFE_SETUP_NAME,
-              StrSize (SAFE_SETUP_NAME)
-              ) ) {
-        State = TRUE;
-      }
+
+
   }
 
 }
@@ -1557,6 +1697,19 @@ UpdateDVMTSetup(
                   &VarSize,
                   &SystemConfiguration
                   );
+
+  if (EFI_ERROR (Status) || VarSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VarSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = gRT->GetVariable(
+              L"SetupRecovery",
+              &gEfiNormalSetupGuid,
+              NULL,
+              &VarSize,
+              &SystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+  }
 
   if((SystemConfiguration.GraphicsDriverMemorySize < 4) && !EFI_ERROR(Status) ) {
     switch (SystemConfiguration.GraphicsDriverMemorySize){

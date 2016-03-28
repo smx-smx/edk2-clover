@@ -47,7 +47,7 @@ ContinuationFunc (
   //
   BootMode = GetBootMode ();
 
-  GetStackInfo (BootMode, TRUE, &StackBase, &StackSize);
+  GetStackInfo (BootMode, TRUE, &StackSize, &StackBase);
   DEBUG ((DEBUG_INFO, "StackBase - 0x%x\n", StackBase));
   DEBUG ((DEBUG_INFO, "StackSize - 0x%x\n", StackSize));
   CallPeiCoreEntryPoint (
@@ -81,7 +81,7 @@ PeiFspInit (
   PeiServicesGetBootMode (&BootMode);
   DEBUG ((DEBUG_INFO, "BootMode - 0x%x\n", BootMode));
 
-  GetStackInfo (BootMode, FALSE, &StackBase, &StackSize);
+  GetStackInfo (BootMode, FALSE, &StackSize, &StackBase);
   DEBUG ((DEBUG_INFO, "StackBase - 0x%x\n", StackBase));
   DEBUG ((DEBUG_INFO, "StackSize - 0x%x\n", StackSize));
 
@@ -97,6 +97,7 @@ PeiFspInit (
   ASSERT(sizeof(FspUpdRgn) >= UpdRegionSize);
   ZeroMem (FspUpdRgn, UpdRegionSize);
   FspRtBuffer.UpdDataRgnPtr = UpdateFspUpdConfigs (FspUpdRgn);
+  FspRtBuffer.BootLoaderTolumSize = 0;
 
   ZeroMem (&FspInitParams, sizeof(FspInitParams));
   FspInitParams.NvsBufferPtr = GetNvsBuffer ();

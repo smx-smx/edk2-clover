@@ -15,14 +15,14 @@
 #define _SEC_FSPE_H_
 
 #include <PiPei.h>
+#include <FspApi.h>
 #include <Library/PcdLib.h>
 #include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
 #include <Library/SerialPortLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/FspCommonLib.h>
-
-#include <FspApi.h>
+#include <Library/FspSecPlatformLib.h>
 
 #define FSP_MCUD_SIGNATURE  SIGNATURE_32 ('M', 'C', 'U', 'D')
 #define FSP_PER0_SIGNATURE  SIGNATURE_32 ('P', 'E', 'R', '0')
@@ -47,14 +47,14 @@ FspGetExceptionHandler(
   It needs to be done as soon as possible after the stack is setup.
 
   @param[in,out] PeiFspData             Pointer of the FSP global data.
-  @param[in]     BootloaderStack        Bootloader stack.
+  @param[in]     BootLoaderStack        BootLoader stack.
   @param[in]     ApiIdx                 The index of the FSP API.
 
 **/
 VOID
 FspGlobalDataInit (
   IN OUT  FSP_GLOBAL_DATA    *PeiFspData,
-  IN UINT32                   BootloaderStack,
+  IN UINT32                   BootLoaderStack,
   IN UINT8                    ApiIdx
   );
 
@@ -80,7 +80,19 @@ FspDataPointerFixUp (
 **/
 UINT32
 EFIAPI
-GetFspBaseAddress (
+AsmGetFspBaseAddress (
+  VOID
+  );
+
+/**
+  This interface gets FspInfoHeader pointer
+
+  @return   FSP binary base address.
+
+**/
+UINT32
+EFIAPI
+AsmGetFspInfoHeader (
   VOID
   );
 

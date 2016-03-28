@@ -1,7 +1,7 @@
 /** @file
   The implementation of EFI IPv6 Configuration Protocol.
 
-  Copyright (c) 2009 - 2014, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2009 - 2016, Intel Corporation. All rights reserved.<BR>
 
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
@@ -52,7 +52,8 @@ Ip6ConfigOnPolicyChanged (
   LIST_ENTRY      *Next;
   IP6_INTERFACE   *IpIf;
   IP6_DAD_ENTRY   *DadEntry;
-
+  IP6_DELAY_JOIN_LIST       *DelayNode;
+  
   //
   // Currently there are only two policies: Manual and Automatic. Regardless of
   // what transition is going on, i.e., Manual -> Automatic and Automatic ->
@@ -94,9 +95,17 @@ Ip6ConfigOnPolicyChanged (
 
   NET_LIST_FOR_EACH (Entry, &IpSb->Interfaces) {
     //
-    // remove all pending DAD entries for the global addresses.
+    // remove all pending delay node and DAD entries for the global addresses.
     //
     IpIf = NET_LIST_USER_STRUCT_S (Entry, IP6_INTERFACE, Link, IP6_INTERFACE_SIGNATURE);
+
+    NET_LIST_FOR_EACH_SAFE (Entry2, Next, &IpIf->DelayJoinList) {
+      DelayNode = NET_LIST_USER_STRUCT (Entry2, IP6_DELAY_JOIN_LIST, Link);
+      if (!NetIp6IsLinkLocalAddr (&DelayNode->AddressInfo->Address)) {
+        RemoveEntryList (&DelayNode->Link);
+        FreePool (DelayNode);
+      }
+    }
 
     NET_LIST_FOR_EACH_SAFE (Entry2, Next, &IpIf->DupAddrDetectList) {
       DadEntry = NET_LIST_USER_STRUCT_S (Entry2, IP6_DAD_ENTRY, Link, IP6_DAD_ENTRY_SIGNATURE);
@@ -2200,7 +2209,7 @@ Ip6ConfigInitInstance (
   DataItem->SetData  = Ip6ConfigSetPolicy;
   DataItem->Data.Ptr = &Instance->Policy;
   DataItem->DataSize = sizeof (Instance->Policy);
-  Instance->Policy   = Ip6ConfigPolicyAutomatic;
+  Instance->Policy   = Ip6ConfigPolicyManual;
   SET_DATA_ATTRIB (DataItem->Attribute, DATA_ATTRIB_SIZE_FIXED);
 
   DataItem           = &Instance->DataItem[Ip6ConfigDataTypeDupAddrDetectTransmits];

@@ -148,7 +148,7 @@ PeiFspMemoryInit (
   PeiServicesGetBootMode (&BootMode);
   DEBUG ((DEBUG_INFO, "BootMode - 0x%x\n", BootMode));
 
-  GetStackInfo (BootMode, FALSE, &StackBase, &StackSize);
+  GetStackInfo (BootMode, FALSE, &StackSize, &StackBase);
   DEBUG ((DEBUG_INFO, "StackBase - 0x%x\n", StackBase));
   DEBUG ((DEBUG_INFO, "StackSize - 0x%x\n", StackSize));
 
@@ -164,6 +164,7 @@ PeiFspMemoryInit (
   ASSERT(sizeof(FspUpdRgn) >= UpdRegionSize);
   ZeroMem (FspUpdRgn, UpdRegionSize);
   FspRtBuffer.UpdDataRgnPtr = UpdateFspUpdConfigs (FspUpdRgn);
+  FspRtBuffer.BootLoaderTolumSize = GetBootLoaderTolumSize ();
 
   ZeroMem (&FspMemoryInitParams, sizeof(FspMemoryInitParams));
   FspMemoryInitParams.NvsBufferPtr = GetNvsBuffer ();
@@ -260,7 +261,11 @@ PeiMemoryDiscoveredNotify (
   VOID                      *FspHobList;
   EFI_HOB_GUID_TYPE         *GuidHob;
 
-  FspHeader = FspFindFspHeader (PcdGet32 (PcdFlashFvFspBase));
+  if (PcdGet32 (PcdFlashFvSecondFspBase) == 0) {
+    FspHeader = FspFindFspHeader (PcdGet32 (PcdFlashFvFspBase));
+  } else {
+    FspHeader = FspFindFspHeader (PcdGet32 (PcdFlashFvSecondFspBase));
+  }
   if (FspHeader == NULL) {
     return EFI_DEVICE_ERROR;
   }

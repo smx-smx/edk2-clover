@@ -2,7 +2,7 @@
   Main file for cp shell level 2 function.
 
   (C) Copyright 2015 Hewlett-Packard Development Company, L.P.<BR>
-  Copyright (c) 2009 - 2014, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2009 - 2015, Intel Corporation. All rights reserved.<BR>
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
   which accompanies this distribution.  The full text of the license may be found at
@@ -53,6 +53,7 @@ ValidateAndCopyFiles(
   @param[in] Dest       pointer to destination file name
   @param[out] Resp      pointer to response from question.  Pass back on looped calling
   @param[in] SilentMode whether to run in quiet mode or not
+  @param[in] CmdName    Source command name requesting single file copy
 
   @retval SHELL_SUCCESS   The source file was copied to the destination
 **/
@@ -62,7 +63,8 @@ CopySingleFile(
   IN CONST CHAR16 *Source,
   IN CONST CHAR16 *Dest,
   OUT VOID        **Resp,
-  IN BOOLEAN      SilentMode
+  IN BOOLEAN      SilentMode,
+  IN CONST CHAR16 *CmdName
   )
 {
   VOID                  *Response;
@@ -132,7 +134,7 @@ CopySingleFile(
   if (ShellIsDirectory(Source) == EFI_SUCCESS) {
     Status = ShellCreateDirectory(Dest, &DestHandle);
     if (EFI_ERROR(Status)) {
-      ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_CP_DEST_DIR_FAIL), gShellLevel2HiiHandle, L"cp", Dest);  
+      ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_CP_DEST_DIR_FAIL), gShellLevel2HiiHandle, CmdName, Dest);  
       return (SHELL_ACCESS_DENIED);
     }
 
@@ -161,15 +163,18 @@ CopySingleFile(
     //
     Status = ShellOpenFileByName(Dest, &DestHandle, EFI_FILE_MODE_READ|EFI_FILE_MODE_WRITE|EFI_FILE_MODE_CREATE, 0);
     if (EFI_ERROR(Status)) {
-      ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_CP_DEST_OPEN_FAIL), gShellLevel2HiiHandle, L"cp", Dest);  
+      ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_CP_DEST_OPEN_FAIL), gShellLevel2HiiHandle, CmdName, Dest);  
       return (SHELL_ACCESS_DENIED);
     }
 
     //
     // open source file
     //
-    Status = ShellOpenFileByName(Source, &SourceHandle, EFI_FILE_MODE_READ, 0);
-    ASSERT_EFI_ERROR(Status);
+    Status = ShellOpenFileByName (Source, &SourceHandle, EFI_FILE_MODE_READ, 0);
+    if (EFI_ERROR (Status)) {
+      ShellPrintHiiEx (-1, -1, NULL, STRING_TOKEN (STR_CP_SRC_OPEN_FAIL), gShellLevel2HiiHandle, CmdName, Source);
+      return (SHELL_ACCESS_DENIED);
+    }
 
     //
     //get file size of source file and freespace available on destination volume
@@ -217,7 +222,7 @@ CopySingleFile(
       //not enough space on destination directory to copy file
       //
       SHELL_FREE_NON_NULL(DestVolumeInfo);
-      ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_CPY_FAIL), gShellLevel2HiiHandle, L"cp");  
+      ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_CPY_FAIL), gShellLevel2HiiHandle, CmdName);  
       return(SHELL_VOLUME_FULL);
     } else {
       //
@@ -231,12 +236,12 @@ CopySingleFile(
           Status = ShellWriteFile(DestHandle, &ReadSize, Buffer);
           if (EFI_ERROR(Status)) {
             ShellStatus = (SHELL_STATUS) (Status & (~MAX_BIT));
-            ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_CPY_WRITE_ERROR), gShellLevel2HiiHandle, L"cp", Dest);   
+            ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_CPY_WRITE_ERROR), gShellLevel2HiiHandle, CmdName, Dest);   
             break;
           }
         } else {
           ShellStatus = (SHELL_STATUS) (Status & (~MAX_BIT));
-          ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_CPY_READ_ERROR), gShellLevel2HiiHandle, L"cp", Source);  
+          ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_CPY_READ_ERROR), gShellLevel2HiiHandle, CmdName, Source);  
           break;
         }
       }
@@ -355,7 +360,7 @@ ValidateAndCopyFiles(
 
     NewSize =  StrSize(CleanFilePathStr);
     NewSize += StrSize(Node->FullName);
-    NewSize += (Cwd == NULL)? 0 : StrSize(Cwd);
+    NewSize += (Cwd == NULL)? 0 : (StrSize(Cwd) + sizeof(CHAR16));
     if (NewSize > PathSize) {
       PathSize = NewSize;
     }
@@ -422,20 +427,21 @@ ValidateAndCopyFiles(
         // simple copy of a single file
         //
         if (Cwd != NULL) {
-          StrnCpy(DestPath, Cwd, PathSize/sizeof(CHAR16)-1);
+          StrCpyS(DestPath, PathSize / sizeof(CHAR16), Cwd);
+          StrCatS(DestPath, PathSize / sizeof(CHAR16), L"\\");
         } else {
           ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_DIR_NF), gShellLevel2HiiHandle, L"cp", CleanFilePathStr);  
           FreePool (CleanFilePathStr);
           return (SHELL_INVALID_PARAMETER);
         }
         if (DestPath[StrLen(DestPath)-1] != L'\\' && CleanFilePathStr[0] != L'\\') {
-          StrnCat(DestPath, L"\\", PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+          StrCatS(DestPath, PathSize / sizeof(CHAR16), L"\\");
         } else if (DestPath[StrLen(DestPath)-1] == L'\\' && CleanFilePathStr[0] == L'\\') {
           ((CHAR16*)DestPath)[StrLen(DestPath)-1] = CHAR_NULL;
         }
-        StrnCat(DestPath, CleanFilePathStr, PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+        StrCatS(DestPath, PathSize/sizeof(CHAR16), CleanFilePathStr);
       } else {
-        StrnCpy(DestPath, CleanFilePathStr, PathSize/sizeof(CHAR16) -1);
+        StrCpyS(DestPath, PathSize/sizeof(CHAR16), CleanFilePathStr);
       }
     } else {
       //
@@ -450,44 +456,46 @@ ValidateAndCopyFiles(
          // Copy to the root of CWD
          //
         if (Cwd != NULL) {
-          StrnCpy(DestPath, Cwd, PathSize/sizeof(CHAR16) -1);
+          StrCpyS(DestPath, PathSize/sizeof(CHAR16), Cwd);
+          StrCatS(DestPath, PathSize/sizeof(CHAR16), L"\\");
         } else {
           ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_DIR_NF), gShellLevel2HiiHandle, L"cp",  CleanFilePathStr); 
           FreePool(CleanFilePathStr);
           return (SHELL_INVALID_PARAMETER);
         }
         while (PathRemoveLastItem(DestPath));
-        StrnCat(DestPath, CleanFilePathStr+1, PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
-        StrnCat(DestPath, Node->FileName, PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+        StrCatS(DestPath, PathSize/sizeof(CHAR16), CleanFilePathStr+1);
+        StrCatS(DestPath, PathSize/sizeof(CHAR16), Node->FileName);
       } else if (StrStr(CleanFilePathStr, L":") == NULL) {
         if (Cwd != NULL) {
-          StrnCpy(DestPath, Cwd, PathSize/sizeof(CHAR16) -1);
+          StrCpyS(DestPath, PathSize/sizeof(CHAR16), Cwd);
+          StrCatS(DestPath, PathSize/sizeof(CHAR16), L"\\");
         } else {
           ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_DIR_NF), gShellLevel2HiiHandle, L"cp", CleanFilePathStr);  
           FreePool(CleanFilePathStr);
           return (SHELL_INVALID_PARAMETER);
         }
         if (DestPath[StrLen(DestPath)-1] != L'\\' && CleanFilePathStr[0] != L'\\') {
-          StrnCat(DestPath, L"\\", PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+          StrCatS(DestPath, PathSize/sizeof(CHAR16), L"\\");
         } else if (DestPath[StrLen(DestPath)-1] == L'\\' && CleanFilePathStr[0] == L'\\') {
           ((CHAR16*)DestPath)[StrLen(DestPath)-1] = CHAR_NULL;
         }
-        StrnCat(DestPath, CleanFilePathStr, PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+        StrCatS(DestPath, PathSize/sizeof(CHAR16), CleanFilePathStr);
         if (CleanFilePathStr[StrLen(CleanFilePathStr)-1] != L'\\' && Node->FileName[0] != L'\\') {
-          StrnCat(DestPath, L"\\", PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+          StrCatS(DestPath, PathSize/sizeof(CHAR16), L"\\");
         } else if (CleanFilePathStr[StrLen(CleanFilePathStr)-1] == L'\\' && Node->FileName[0] == L'\\') {
           ((CHAR16*)DestPath)[StrLen(DestPath)-1] = CHAR_NULL;
         }
-        StrnCat(DestPath, Node->FileName, PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+        StrCatS(DestPath, PathSize/sizeof(CHAR16), Node->FileName);
 
       } else {
-        StrnCpy(DestPath, CleanFilePathStr, PathSize/sizeof(CHAR16) -1);
+        StrCpyS(DestPath, PathSize/sizeof(CHAR16), CleanFilePathStr);
         if (CleanFilePathStr[StrLen(CleanFilePathStr)-1] != L'\\' && Node->FileName[0] != L'\\') {
-          StrnCat(DestPath, L"\\", PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+          StrCatS(DestPath, PathSize/sizeof(CHAR16), L"\\");
         } else if (CleanFilePathStr[StrLen(CleanFilePathStr)-1] == L'\\' && Node->FileName[0] == L'\\') {
           ((CHAR16*)CleanFilePathStr)[StrLen(CleanFilePathStr)-1] = CHAR_NULL;
         }
-        StrnCat(DestPath, Node->FileName, PathSize/sizeof(CHAR16) - StrLen(DestPath) -1);
+        StrCatS(DestPath, PathSize/sizeof(CHAR16), Node->FileName);
       }
     }
     
@@ -531,7 +539,7 @@ ValidateAndCopyFiles(
     //
     // copy single file...
     //
-    ShellStatus = CopySingleFile(Node->FullName, DestPath, &Response, SilentMode);
+    ShellStatus = CopySingleFile(Node->FullName, DestPath, &Response, SilentMode, L"cp");
     if (ShellStatus != SHELL_SUCCESS) {
       break;
     }
@@ -639,6 +647,7 @@ ShellCommandRunCp (
   BOOLEAN             SilentMode;
   BOOLEAN             RecursiveMode;
   CONST CHAR16        *Cwd;
+  CHAR16              *FullCwd;
 
   ProblemParam        = NULL;
   ShellStatus         = SHELL_SUCCESS;
@@ -707,7 +716,11 @@ ShellCommandRunCp (
             ShellPrintHiiEx(-1, -1, NULL, STRING_TOKEN (STR_GEN_FILE_NF), gShellLevel2HiiHandle, L"cp", ShellCommandLineGetRawValue(Package, 1));  
             ShellStatus = SHELL_NOT_FOUND;
           } else  {
-            ShellStatus = ProcessValidateAndCopyFiles(FileList, Cwd, SilentMode, RecursiveMode);
+            FullCwd = AllocateZeroPool(StrSize(Cwd) + sizeof(CHAR16));
+            ASSERT (FullCwd != NULL);
+            StrCpyS(FullCwd, StrSize(Cwd)/sizeof(CHAR16)+1, Cwd);
+            ShellStatus = ProcessValidateAndCopyFiles(FileList, FullCwd, SilentMode, RecursiveMode);
+            FreePool(FullCwd);
           }
         }
 

@@ -2,7 +2,8 @@
   EFI_FILE_PROTOCOL wrappers for other items (Like Environment Variables,
   StdIn, StdOut, StdErr, etc...).
 
-  Copyright (c) 2009 - 2014, Intel Corporation. All rights reserved.<BR>
+  Copyright 2016 Dell Inc.
+  Copyright (c) 2009 - 2016, Intel Corporation. All rights reserved.<BR>
   (C) Copyright 2013 Hewlett-Packard Development Company, L.P.<BR>
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
@@ -16,6 +17,8 @@
 
 #include "Shell.h"
 #include "FileHandleInternal.h"
+
+#define MEM_WRITE_REALLOC_OVERHEAD 1024
 
 /**
   File style interface for console (Open).  
@@ -159,9 +162,11 @@ FileInterfaceStdOutWrite(
 {
   if (ShellInfoObject.ShellInitSettings.BitUnion.Bits.NoConsoleOut) {
     return (EFI_UNSUPPORTED);
-  } else {
-    return (gST->ConOut->OutputString(gST->ConOut, Buffer));
   }
+  if (*((CHAR16 *)Buffer) == gUnicodeFileTag) {
+    return (gST->ConOut->OutputString(gST->ConOut, (CHAR16 *)Buffer + 1));
+  }
+  return (gST->ConOut->OutputString(gST->ConOut, Buffer));
 }
 
 /**
@@ -509,19 +514,24 @@ FileInterfaceStdInRead(
         if (StrStr(CurrentString + TabPos, L":") == NULL) {
           Cwd = ShellInfoObject.NewEfiShellProtocol->GetCurDir(NULL);
           if (Cwd != NULL) {
-            StrnCpy(TabStr, Cwd, (*BufferSize)/sizeof(CHAR16) - 1);
+            StrnCpyS(TabStr, (*BufferSize)/sizeof(CHAR16), Cwd, (*BufferSize)/sizeof(CHAR16) - 1);
+            StrCatS(TabStr, (*BufferSize)/sizeof(CHAR16), L"\\");
             if (TabStr[StrLen(TabStr)-1] == L'\\' && *(CurrentString + TabPos) == L'\\' ) {
               TabStr[StrLen(TabStr)-1] = CHAR_NULL;
             }
-            StrnCat(TabStr, CurrentString + TabPos, (StringLen - TabPos) * sizeof (CHAR16));
+            StrnCatS( TabStr, 
+                      (*BufferSize)/sizeof(CHAR16), 
+                      CurrentString + TabPos, 
+                      StringLen - TabPos
+                      );
           } else {
             *TabStr = CHAR_NULL;
-            StrnCat(TabStr, CurrentString + TabPos, (StringLen - TabPos) * sizeof (CHAR16));
+            StrnCatS(TabStr, (*BufferSize)/sizeof(CHAR16), CurrentString + TabPos, StringLen - TabPos);
           }
         } else {
-          StrnCpy(TabStr, CurrentString + TabPos, (*BufferSize)/sizeof(CHAR16) - 1);
+          StrnCpyS(TabStr, (*BufferSize)/sizeof(CHAR16), CurrentString + TabPos, (*BufferSize)/sizeof(CHAR16) - 1);
         }
-        StrnCat(TabStr, L"*", (*BufferSize)/sizeof(CHAR16) - 1 - StrLen(TabStr));
+        StrnCatS(TabStr, (*BufferSize)/sizeof(CHAR16), L"*", (*BufferSize)/sizeof(CHAR16) - 1 - StrLen(TabStr));
         FoundFileList = NULL;
         Status  = ShellInfoObject.NewEfiShellProtocol->FindFiles(TabStr, &FoundFileList);
         for ( TempStr = CurrentString
@@ -562,8 +572,7 @@ FileInterfaceStdInRead(
             TabLinePos = (EFI_SHELL_FILE_INFO*)GetFirstNode(&FoundFileList->Link);
             InTabScrolling = TRUE;
           } else {
-            FreePool(FoundFileList);
-            FoundFileList = NULL;
+            ShellInfoObject.NewEfiShellProtocol->FreeFileList (&FoundFileList);
           }
         }
       }
@@ -846,6 +855,9 @@ FileInterfaceStdInRead(
   // if this was used it should be deallocated by now...
   // prevent memory leaks...
   //
+  if (FoundFileList != NULL) {
+    ShellInfoObject.NewEfiShellProtocol->FreeFileList (&FoundFileList);
+  }
   ASSERT(FoundFileList == NULL);
 
   return Status;
@@ -1317,6 +1329,7 @@ typedef struct {
   UINT64                Position;
   UINT64                BufferSize;
   BOOLEAN               Unicode;
+  UINT64                FileSize;
 } EFI_FILE_PROTOCOL_MEM;
 
 /**
@@ -1335,7 +1348,7 @@ FileInterfaceMemSetPosition(
   OUT UINT64 Position
   )
 {
-  if (Position <= ((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize) {
+  if (Position <= ((EFI_FILE_PROTOCOL_MEM*)This)->FileSize) {
     ((EFI_FILE_PROTOCOL_MEM*)This)->Position = Position;
     return (EFI_SUCCESS);
   } else {
@@ -1380,17 +1393,21 @@ FileInterfaceMemWrite(
   IN VOID *Buffer
   )
 {
-  CHAR8 *AsciiBuffer;
-  if (((EFI_FILE_PROTOCOL_MEM*)This)->Unicode) {
+  CHAR8                  *AsciiBuffer;
+  EFI_FILE_PROTOCOL_MEM  *MemFile;
+
+  MemFile = (EFI_FILE_PROTOCOL_MEM *) This;
+  if (MemFile->Unicode) {
     //
     // Unicode
     //
-    if ((UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->Position + (*BufferSize)) > (UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize)) {
-      ((EFI_FILE_PROTOCOL_MEM*)This)->Buffer = ReallocatePool((UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize), (UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize) + (*BufferSize) + 10, ((EFI_FILE_PROTOCOL_MEM*)This)->Buffer);
-      ((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize += (*BufferSize) + 10;
+    if ((UINTN)(MemFile->Position + (*BufferSize)) > (UINTN)(MemFile->BufferSize)) {
+      MemFile->Buffer = ReallocatePool((UINTN)(MemFile->BufferSize), (UINTN)(MemFile->BufferSize) + (*BufferSize) + MEM_WRITE_REALLOC_OVERHEAD, MemFile->Buffer);
+      MemFile->BufferSize += (*BufferSize) + MEM_WRITE_REALLOC_OVERHEAD;
     }
-    CopyMem(((UINT8*)((EFI_FILE_PROTOCOL_MEM*)This)->Buffer) + ((EFI_FILE_PROTOCOL_MEM*)This)->Position, Buffer, *BufferSize);
-    ((EFI_FILE_PROTOCOL_MEM*)This)->Position += (*BufferSize);
+    CopyMem(((UINT8*)MemFile->Buffer) + MemFile->Position, Buffer, *BufferSize);
+    MemFile->Position += (*BufferSize);
+    MemFile->FileSize = MemFile->Position;
     return (EFI_SUCCESS);
   } else {
     //
@@ -1401,12 +1418,13 @@ FileInterfaceMemWrite(
       return (EFI_OUT_OF_RESOURCES);
     }
     AsciiSPrint(AsciiBuffer, *BufferSize, "%S", Buffer);
-    if ((UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->Position + AsciiStrSize(AsciiBuffer)) > (UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize)) {
-      ((EFI_FILE_PROTOCOL_MEM*)This)->Buffer = ReallocatePool((UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize), (UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize) + AsciiStrSize(AsciiBuffer) + 10, ((EFI_FILE_PROTOCOL_MEM*)This)->Buffer);
-      ((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize += AsciiStrSize(AsciiBuffer) + 10;
+    if ((UINTN)(MemFile->Position + AsciiStrSize(AsciiBuffer)) > (UINTN)(MemFile->BufferSize)) {
+      MemFile->Buffer = ReallocatePool((UINTN)(MemFile->BufferSize), (UINTN)(MemFile->BufferSize) + AsciiStrSize(AsciiBuffer) + MEM_WRITE_REALLOC_OVERHEAD, MemFile->Buffer);
+      MemFile->BufferSize += AsciiStrSize(AsciiBuffer) + MEM_WRITE_REALLOC_OVERHEAD;
     }
-    CopyMem(((UINT8*)((EFI_FILE_PROTOCOL_MEM*)This)->Buffer) + ((EFI_FILE_PROTOCOL_MEM*)This)->Position, AsciiBuffer, AsciiStrSize(AsciiBuffer));
-    ((EFI_FILE_PROTOCOL_MEM*)This)->Position += AsciiStrSize(AsciiBuffer);
+    CopyMem(((UINT8*)MemFile->Buffer) + MemFile->Position, AsciiBuffer, AsciiStrSize(AsciiBuffer));
+    MemFile->Position += (*BufferSize / sizeof(CHAR16));
+    MemFile->FileSize = MemFile->Position;
     FreePool(AsciiBuffer);
     return (EFI_SUCCESS);
   }
@@ -1429,11 +1447,14 @@ FileInterfaceMemRead(
   IN VOID *Buffer
   )
 {
-  if (*BufferSize > (UINTN)((((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize) - (UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->Position))) {
-    (*BufferSize) = (UINTN)((((EFI_FILE_PROTOCOL_MEM*)This)->BufferSize) - (UINTN)(((EFI_FILE_PROTOCOL_MEM*)This)->Position));
+  EFI_FILE_PROTOCOL_MEM  *MemFile;
+
+  MemFile = (EFI_FILE_PROTOCOL_MEM *) This;
+  if (*BufferSize > (UINTN)((MemFile->FileSize) - (UINTN)(MemFile->Position))) {
+    (*BufferSize) = (UINTN)((MemFile->FileSize) - (UINTN)(MemFile->Position));
   }
-  CopyMem(Buffer, ((UINT8*)((EFI_FILE_PROTOCOL_MEM*)This)->Buffer) + ((EFI_FILE_PROTOCOL_MEM*)This)->Position, (*BufferSize));
-  ((EFI_FILE_PROTOCOL_MEM*)This)->Position = ((EFI_FILE_PROTOCOL_MEM*)This)->Position + (*BufferSize);
+  CopyMem(Buffer, ((UINT8*)MemFile->Buffer) + MemFile->Position, (*BufferSize));
+  MemFile->Position = MemFile->Position + (*BufferSize);
   return (EFI_SUCCESS);
 }
 
@@ -1501,6 +1522,17 @@ CreateFileInterfaceMem(
   ASSERT(FileInterface->Buffer      == NULL);
   ASSERT(FileInterface->BufferSize  == 0);
   ASSERT(FileInterface->Position    == 0);
+
+  if (Unicode) {
+    FileInterface->Buffer = AllocateZeroPool(sizeof(gUnicodeFileTag));
+    if (FileInterface->Buffer == NULL) {
+      FreePool (FileInterface);
+      return NULL;
+    }
+    *((CHAR16 *) (FileInterface->Buffer)) = EFI_UNICODE_BYTE_ORDER_MARK;
+    FileInterface->BufferSize = 2;
+    FileInterface->Position = 2;
+  }
 
   return ((EFI_FILE_PROTOCOL *)FileInterface);
 }
@@ -1666,8 +1698,10 @@ FileInterfaceFileRead(
   OUT VOID                    *Buffer
   )
 {
-  CHAR8       *AsciiBuffer;
+  CHAR8       *AsciiStrBuffer;
+  CHAR16      *UscStrBuffer;
   UINTN       Size;
+  UINTN       CharNum;
   EFI_STATUS  Status;
   if (((EFI_FILE_PROTOCOL_FILE*)This)->Unicode) {
     //
@@ -1678,10 +1712,27 @@ FileInterfaceFileRead(
     //
     // Ascii
     //
-    AsciiBuffer = AllocateZeroPool((Size = *BufferSize));
-    Status = (((EFI_FILE_PROTOCOL_FILE*)This)->Orig->Read(((EFI_FILE_PROTOCOL_FILE*)This)->Orig, &Size, AsciiBuffer));
-    UnicodeSPrint(Buffer, *BufferSize, L"%a", AsciiBuffer);
-    FreePool(AsciiBuffer);
+    Size  = (*BufferSize) / sizeof(CHAR16);
+    AsciiStrBuffer = AllocateZeroPool(Size + sizeof(CHAR8));
+    if (AsciiStrBuffer == NULL) {
+      return EFI_OUT_OF_RESOURCES;
+    }
+    UscStrBuffer = AllocateZeroPool(*BufferSize + sizeof(CHAR16));
+    if (UscStrBuffer== NULL) {
+      SHELL_FREE_NON_NULL(AsciiStrBuffer);
+      return EFI_OUT_OF_RESOURCES;
+    }
+    Status = (((EFI_FILE_PROTOCOL_FILE*)This)->Orig->Read(((EFI_FILE_PROTOCOL_FILE*)This)->Orig, &Size, AsciiStrBuffer));
+    if (!EFI_ERROR(Status)) {
+      CharNum = UnicodeSPrint(UscStrBuffer, *BufferSize + sizeof(CHAR16), L"%a", AsciiStrBuffer);
+      if (CharNum == Size) {
+        CopyMem (Buffer, UscStrBuffer, *BufferSize);
+      } else {
+        Status = EFI_UNSUPPORTED;
+      }
+    }
+    SHELL_FREE_NON_NULL(AsciiStrBuffer);
+    SHELL_FREE_NON_NULL(UscStrBuffer);
     return (Status);
   }
 }

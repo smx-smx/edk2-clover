@@ -43,7 +43,7 @@ _ModuleEntryPoint
   bl    ArmPlatformIsPrimaryCore
 
   // Get the top of the primary stacks (and the base of the secondary stacks)
-  LoadConstantToReg (FixedPcdGet32(PcdCPUCoresStackBase), r1)
+  LoadConstantToReg (FixedPcdGet64(PcdCPUCoresStackBase), r1)
   LoadConstantToReg (FixedPcdGet32(PcdCPUCorePrimaryStackSize), r2)
   add   r1, r1, r2
 
@@ -84,12 +84,7 @@ _PrepareArguments
   blx   r3
 
 _SetupPrimaryCoreStack
-  // r1 contains the top of the primary stack
-  LoadConstantToReg (FixedPcdGet32(PcdPeiGlobalVariableSize), r2)
-
-  // The reserved space for global variable must be 8-bytes aligned for pushing
-  // 64-bit variable on the stack
-  SetPrimaryStack (r1, r2, r3)
+  mov   sp, r1
   b     _PrepareArguments
 
 _NeverReturn

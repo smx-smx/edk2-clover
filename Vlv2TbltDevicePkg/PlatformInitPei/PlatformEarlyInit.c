@@ -196,7 +196,19 @@ GetSetupVariable (
                        &VariableSize,
                        SystemConfiguration
                        );
-  ASSERT_EFI_ERROR(Status);
+  if (EFI_ERROR (Status) || VariableSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VariableSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = Variable->GetVariable(
+              Variable,
+              L"SetupRecovery",
+              &gEfiSetupVariableGuid,
+              NULL,
+              &VariableSize,
+              SystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+  }  
   return Status;
 }
 
@@ -893,6 +905,7 @@ PlatformEarlyInitEntry (
       PlatformInfo->BoardId == BOARD_ID_BB_RVP ||
       PlatformInfo->BoardId == BOARD_ID_BS_RVP ||
       PlatformInfo->BoardId == BOARD_ID_MINNOW2 ||
+      PlatformInfo->BoardId == BOARD_ID_MINNOW2_TURBOT||
       PlatformInfo->BoardId == BOARD_ID_CVH) {
     ConfigureLpssAndSccGpio(&SystemConfiguration, PlatformInfo);
 

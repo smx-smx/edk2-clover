@@ -1,7 +1,7 @@
 /** @file
 Implementation of interfaces function for EFI_HII_CONFIG_ROUTING_PROTOCOL.
 
-Copyright (c) 2007 - 2014, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2007 - 2016, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
 which accompanies this distribution.  The full text of the license may be found at
@@ -252,8 +252,7 @@ GenerateSubStr (
   Str    = AllocateZeroPool (Length * sizeof (CHAR16));
   ASSERT (Str != NULL);
 
-  StrCpy (Str, String);
-  Length = (BufferLen * 2 + 1) * sizeof (CHAR16);
+  StrCpyS (Str, Length, String);
 
   StringHeader = Str + StrLen (String);
   TemString    = (CHAR16 *) StringHeader;
@@ -297,7 +296,7 @@ GenerateSubStr (
   //
   // Convert the uppercase to lowercase since <HexAf> is defined in lowercase format.
   //
-  StrCat (Str, L"&");  
+  StrCatS (Str, Length, L"&");  
   HiiToLower (Str);
 
   *SubStr = Str;
@@ -392,6 +391,7 @@ AppendToMultiString (
 {
   UINTN AppendStringSize;
   UINTN MultiStringSize;
+  UINTN MaxLen;
 
   if (MultiString == NULL || *MultiString == NULL || AppendString == NULL) {
     return EFI_INVALID_PARAMETER;
@@ -399,6 +399,7 @@ AppendToMultiString (
 
   AppendStringSize = StrSize (AppendString);
   MultiStringSize  = StrSize (*MultiString);
+  MaxLen = MAX_STRING_LENGTH / sizeof (CHAR16);
 
   //
   // Enlarge the buffer each time when length exceeds MAX_STRING_LENGTH.
@@ -410,12 +411,13 @@ AppendToMultiString (
                                   MultiStringSize + AppendStringSize,
                                   (VOID *) (*MultiString)
                                   );
+    MaxLen = (MultiStringSize + AppendStringSize) / sizeof (CHAR16);
     ASSERT (*MultiString != NULL);
   }
   //
   // Append the incoming string
   //
-  StrCat (*MultiString, AppendString);
+  StrCatS (*MultiString, MaxLen, AppendString);
 
   return EFI_SUCCESS;
 }
@@ -536,6 +538,8 @@ MergeDefaultString (
   EFI_STRING   AltConfigHdr;
   UINTN        HeaderLength;
   UINTN        SizeAltCfgResp;
+  UINTN        MaxLen;
+  UINTN        TotalSize;
   
   if (*AltCfgResp == NULL) {
     return EFI_INVALID_PARAMETER;
@@ -572,13 +576,14 @@ MergeDefaultString (
   // Construct AltConfigHdr string  "&<ConfigHdr>&ALTCFG=XXXX\0"
   //                                  |1| StrLen (ConfigHdr) | 8 | 4 | 1 |
   //
-  AltConfigHdr = AllocateZeroPool ((1 + HeaderLength + 8 + 4 + 1) * sizeof (CHAR16));
+  MaxLen = 1 + HeaderLength + 8 + 4 + 1;
+  AltConfigHdr = AllocateZeroPool (MaxLen * sizeof (CHAR16));
   if (AltConfigHdr == NULL) {
     return EFI_OUT_OF_RESOURCES;
   }
-  StrCpy (AltConfigHdr, L"&");
-  StrnCat (AltConfigHdr, *AltCfgResp, HeaderLength);
-  StrCat (AltConfigHdr, L"&ALTCFG=");
+  StrCpyS (AltConfigHdr, MaxLen, L"&");
+  StrnCatS (AltConfigHdr, MaxLen, *AltCfgResp, HeaderLength);
+  StrCatS (AltConfigHdr, MaxLen, L"&ALTCFG=");
   HeaderLength = StrLen (AltConfigHdr);
   
   StringPtrDefault = StrStr (DefaultAltCfgResp, AltConfigHdr);
@@ -586,7 +591,7 @@ MergeDefaultString (
     //
     // Get AltCfg Name
     //
-    StrnCat (AltConfigHdr, StringPtrDefault + HeaderLength, 4);
+    StrnCatS (AltConfigHdr, MaxLen, StringPtrDefault + HeaderLength, 4);
     StringPtr = StrStr (*AltCfgResp, AltConfigHdr); 
     
     //
@@ -595,34 +600,35 @@ MergeDefaultString (
     if (StringPtr == NULL) {
       StringPtrEnd   = StrStr (StringPtrDefault + 1, L"&GUID");
       SizeAltCfgResp = StrSize (*AltCfgResp);
+      TotalSize = SizeAltCfgResp + StrSize (StringPtrDefault);
       if (StringPtrEnd == NULL) {
         //
         // No more default string is found.
         //
         *AltCfgResp    = (EFI_STRING) ReallocatePool (
                                      SizeAltCfgResp,
-                                     SizeAltCfgResp + StrSize (StringPtrDefault),
+                                     TotalSize,
                                      (VOID *) (*AltCfgResp)
                                      );
         if (*AltCfgResp == NULL) {
           FreePool (AltConfigHdr);
           return EFI_OUT_OF_RESOURCES;
         }
-        StrCat (*AltCfgResp, StringPtrDefault);
+        StrCatS (*AltCfgResp, TotalSize / sizeof (CHAR16), StringPtrDefault);
         break;
       } else {
         TempChar = *StringPtrEnd;
         *StringPtrEnd = L'\0';
         *AltCfgResp = (EFI_STRING) ReallocatePool (
                                      SizeAltCfgResp,
-                                     SizeAltCfgResp + StrSize (StringPtrDefault),
+                                     TotalSize,
                                      (VOID *) (*AltCfgResp)
                                      );
         if (*AltCfgResp == NULL) {
           FreePool (AltConfigHdr);
           return EFI_OUT_OF_RESOURCES;
         }
-        StrCat (*AltCfgResp, StringPtrDefault);
+        StrCatS (*AltCfgResp, TotalSize / sizeof (CHAR16), StringPtrDefault);
         *StringPtrEnd = TempChar;
       }
     }
@@ -1188,8 +1194,8 @@ GetVarStoreType (
         Status = EFI_OUT_OF_RESOURCES;
         goto Done;
       }
-      StrCpy (TempStr, GuidStr);
-      StrCat (TempStr, NameStr);
+      StrCpyS (TempStr, LengthString, GuidStr);
+      StrCatS (TempStr, LengthString, NameStr);
       if (ConfigHdr == NULL || StrnCmp (ConfigHdr, TempStr, StrLen (TempStr)) == 0) {
         *EfiVarStore = (EFI_IFR_VARSTORE_EFI *) AllocateZeroPool (IfrOpHdr->Length);
         if (*EfiVarStore == NULL) {
@@ -1304,8 +1310,8 @@ IsThisVarstore (
     goto Done;
   }
 
-  StrCpy (TempStr, GuidStr);
-  StrCat (TempStr, NameStr);
+  StrCpyS (TempStr, LengthString, GuidStr);
+  StrCatS (TempStr, LengthString, NameStr);
 
   if (ConfigHdr == NULL || StrnCmp (ConfigHdr, TempStr, StrLen (TempStr)) == 0) {
     RetVal = TRUE;
@@ -1460,7 +1466,8 @@ Done:
   @param  ReturnData             The data block added for this opcode.
 
   @retval  EFI_SUCCESS           This opcode is required.
-  @retval  Others                This opcode is not required or error occur.
+  @retval  EFI_NOT_FOUND         This opcode is not required.
+  @retval  Others                Contain some error.
                                  
 **/
 EFI_STATUS
@@ -1492,7 +1499,7 @@ IsThisOpcodeRequired (
       //
       // This question is not in the requested string. Skip it.
       //
-      return EFI_SUCCESS;
+      return EFI_NOT_FOUND;
     }
   } else {
     VarOffset = IfrQuestionHdr->VarStoreInfo.VarOffset;
@@ -1504,7 +1511,7 @@ IsThisOpcodeRequired (
       //
       // This question is not in the requested string. Skip it.
       //
-      return EFI_SUCCESS;
+      return EFI_NOT_FOUND;
     }
 
     //
@@ -1593,6 +1600,7 @@ ParseIfrData (
   UINT16                   VarWidth;
   UINT16                   VarDefaultId;
   BOOLEAN                  FirstOneOfOption;
+  BOOLEAN                  FirstOrderedList;
   LIST_ENTRY               *LinkData;
   LIST_ENTRY               *LinkDefault;
   EFI_IFR_VARSTORE_NAME_VALUE *IfrNameValueVarStore;
@@ -1604,6 +1612,7 @@ ParseIfrData (
   DefaultDataPtr   = NULL;
   FirstOneOfOption = FALSE;
   VarStoreId       = 0;
+  FirstOrderedList = FALSE;
   ZeroMem (&DefaultData, sizeof (IFR_DEFAULT_DATA));
 
   //
@@ -1764,8 +1773,21 @@ ParseIfrData (
       }
       VarWidth  = (UINT16) (sizeof (EFI_HII_REF));
 
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
       break;
@@ -1792,17 +1814,28 @@ ParseIfrData (
       }
       VarWidth  = (UINT16) (1 << (IfrOneOf->Flags & EFI_IFR_NUMERIC_SIZE));
 
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
 
-      if (BlockData == NULL) {
-        //
-        // BlockData == NULL means this opcode is not in the requst array.
-        //
-        break;
-      }
+      //
+      //when go to there,BlockData can't be NULLL.
+      //
+      ASSERT (BlockData != NULL);
 
       if (IfrOpHdr->OpCode == EFI_IFR_ONE_OF_OP) {
         //
@@ -1850,9 +1883,9 @@ ParseIfrData (
       //
       // offset by question header
       // width by EFI_IFR_ORDERED_LIST MaxContainers * OneofOption Type
-      // no default value and default id, how to define its default value?
       //
 
+      FirstOrderedList = TRUE;
       //
       // OrderedList question is not in IFR Form. This IFR form is not valid. 
       //
@@ -1869,8 +1902,22 @@ ParseIfrData (
         break;
       }
       VarWidth  = IfrOrderedList->MaxContainers;
+
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
       break;
@@ -1900,17 +1947,29 @@ ParseIfrData (
         break;
       }
       VarWidth  = (UINT16) sizeof (BOOLEAN);
+
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
 
-      if (BlockData == NULL) {
-        //
-        // BlockData == NULL means this opcode is not in the requst array.
-        //
-        break;
-      }
+      //
+      //when go to there,BlockData can't be NULLL.
+      //
+      ASSERT (BlockData != NULL);
 
       //
       // Add default value for standard ID by CheckBox Flag
@@ -1987,9 +2046,22 @@ ParseIfrData (
         break;
       }
 
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       VarWidth  = (UINT16) sizeof (EFI_HII_DATE);
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
       break;
@@ -2016,9 +2088,22 @@ ParseIfrData (
         break;
       }
 
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       VarWidth  = (UINT16) sizeof (EFI_HII_TIME);
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
       break;
@@ -2045,16 +2130,24 @@ ParseIfrData (
         break;
       }
 
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       VarWidth  = (UINT16) (IfrString->MaxSize * sizeof (UINT16));
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
-
-      //
-      // No default value for string.
-      //
-      BlockData = NULL;
       break;
 
     case EFI_IFR_PASSWORD_OP:
@@ -2079,9 +2172,22 @@ ParseIfrData (
         break;
       }
 
+      //
+      // The BlockData may allocate by other opcode,need to clean.
+      //
+      if (BlockData != NULL){
+        BlockData = NULL;
+      }
+
       VarWidth  = (UINT16) (IfrPassword->MaxSize * sizeof (UINT16));
       Status = IsThisOpcodeRequired(RequestBlockArray, HiiHandle, VarStorageData, IfrOpHdr, VarWidth, &BlockData);
       if (EFI_ERROR (Status)) {
+        if (Status == EFI_NOT_FOUND){
+          //
+          //The opcode is not required,exit and parse other opcode.
+          //
+          break;
+        }
         goto Done;
       }
 
@@ -2101,6 +2207,10 @@ ParseIfrData (
 
       IfrOneOfOption = (EFI_IFR_ONE_OF_OPTION *) IfrOpHdr;
       if (BlockData->OpCode == EFI_IFR_ORDERED_LIST_OP) {
+
+        if (!FirstOrderedList){
+          break;
+        }
         //
         // Get ordered list option data type.
         //
@@ -2157,10 +2267,9 @@ ParseIfrData (
         // Add Block Data into VarStorageData BlockEntry
         //
         InsertBlockData (&VarStorageData->BlockEntry, &BlockData);
-        //
-        // No default data for OrderedList.
-        //
-        BlockData = NULL;
+
+        FirstOrderedList = FALSE;
+
         break;
       }
 
@@ -2221,12 +2330,6 @@ ParseIfrData (
         break;
       }
 
-      if (BlockData->OpCode == EFI_IFR_ORDERED_LIST_OP) {
-        //
-        // OrderedList Opcode is no default value.
-        //
-        break;
-      }
       //
       // Get the DefaultId
       //
@@ -2286,6 +2389,14 @@ ParseIfrData (
 
     IfrOffset     += IfrOpHdr->Length;
     PackageOffset += IfrOpHdr->Length;
+  }
+
+  //
+  //if Status == EFI_NOT_FOUND, just means the opcode is not required,not contain any error,
+  //so set the Status to EFI_SUCCESS.
+  //
+  if (Status == EFI_NOT_FOUND){
+    Status = EFI_SUCCESS;
   }
 
 Done:
@@ -2666,7 +2777,7 @@ GenerateConfigRequest (
   //
   // Start with <ConfigHdr>
   //
-  StrCpy (StringPtr, ConfigHdr);
+  StrCpyS (StringPtr, Length, ConfigHdr);
   StringPtr += StrLen (StringPtr);
 
   //
@@ -2765,12 +2876,12 @@ GenerateHdr (
     Status = EFI_OUT_OF_RESOURCES;
     goto Done;
   }
-  StrCpy (*ConfigHdr, GuidStr);
-  StrCat (*ConfigHdr, NameStr);
+  StrCpyS (*ConfigHdr, Length, GuidStr);
+  StrCatS (*ConfigHdr, Length, NameStr);
   if (VarStorageData->Name == NULL) {
-    StrCat (*ConfigHdr, L"&");
+    StrCatS (*ConfigHdr, Length, L"&");
   }
-  StrCat (*ConfigHdr, PathStr);
+  StrCatS (*ConfigHdr, Length, PathStr);
 
   //
   // Remove the last character L'&'
@@ -2844,6 +2955,7 @@ GetStorageWidth (
 /**
   Generate ConfigAltResp string base on the varstore info.
 
+  @param      HiiHandle             Hii Handle for this hii package.
   @param      ConfigHdr             The config header for this varstore.
   @param      VarStorageData        The varstore info.
   @param      DefaultIdArray        The Default id array.
@@ -2854,6 +2966,7 @@ GetStorageWidth (
 **/
 EFI_STATUS
 GenerateAltConfigResp (
+  IN  EFI_HII_HANDLE               HiiHandle,
   IN  CHAR16                       *ConfigHdr,
   IN  IFR_VARSTORAGE_DATA          *VarStorageData,
   IN  IFR_DEFAULT_DATA             *DefaultIdArray,
@@ -2872,10 +2985,11 @@ GenerateAltConfigResp (
   IFR_DEFAULT_DATA      *DefaultValueData;
   UINTN                 Width;
   UINT8                 *TmpBuffer;
+  CHAR16                *DefaultString;
 
   BlockData     = NULL;
   DataExist     = FALSE;
-
+  DefaultString = NULL;
   //
   // Add length for <ConfigHdr> + '\0'
   //
@@ -2934,7 +3048,7 @@ GenerateAltConfigResp (
   //
   // Start with <ConfigHdr>
   //
-  StrCpy (StringPtr, ConfigHdr);
+  StrCpyS (StringPtr, Length, ConfigHdr);
   StringPtr += StrLen (StringPtr);
 
   for (Link = DefaultIdArray->Entry.ForwardLink; Link != &DefaultIdArray->Entry; Link = Link->ForwardLink) {
@@ -2987,9 +3101,18 @@ GenerateAltConfigResp (
         // Convert Value to a hex string in "%x" format
         // NOTE: This is in the opposite byte that GUID and PATH use
         //
-        TmpBuffer = (UINT8 *) &(DefaultValueData->Value);
-        for (; Width > 0; Width--) {
+        if (BlockData->OpCode == EFI_IFR_STRING_OP){
+          DefaultString   = InternalGetString(HiiHandle, DefaultValueData->Value.string);
+          TmpBuffer = (UINT8 *) DefaultString;
+        } else {
+          TmpBuffer = (UINT8 *) &(DefaultValueData->Value);
+        }
+        for (; Width > 0 && (TmpBuffer != NULL); Width--) {
           StringPtr += UnicodeValueToString (StringPtr, PREFIX_ZERO | RADIX_HEX, TmpBuffer[Width - 1], 2);
+        }
+        if (DefaultString != NULL){
+          FreePool(DefaultString);
+          DefaultString = NULL;
         }
       }
     }
@@ -3212,7 +3335,7 @@ GetFullStringFromHiiFormPackages (
   // Go through all VarStorageData Entry and get the DefaultId array for each one
   // Then construct them all to : ConfigHdr AltConfigHdr ConfigBody AltConfigHdr ConfigBody
   //
-  Status = GenerateAltConfigResp (ConfigHdr, VarStorageData, DefaultIdArray, &DefaultAltCfgResp);
+  Status = GenerateAltConfigResp (DataBaseRecord->Handle,ConfigHdr, VarStorageData, DefaultIdArray, &DefaultAltCfgResp);
   if (EFI_ERROR (Status)) {
     goto Done;
   }
@@ -3861,7 +3984,9 @@ HiiConfigRoutingExtractConfig (
                       &gEfiHiiConfigAccessProtocolGuid,
                       (VOID **) &ConfigAccess
                       );
-      ASSERT_EFI_ERROR (Status);
+      if (EFI_ERROR (Status)) {
+        goto Done;
+      }
 
       Status = ConfigAccess->ExtractConfig (
                                ConfigAccess,
@@ -4332,7 +4457,11 @@ HiiConfigRoutingRouteConfig (
                       &gEfiHiiConfigAccessProtocolGuid,
                       (VOID **)  &ConfigAccess
                       );
-      ASSERT_EFI_ERROR (Status);
+      if (EFI_ERROR (Status)) {
+        *Progress = StringPtr;
+        FreePool (ConfigResp);
+        return EFI_NOT_FOUND;
+      }
 
       Status = ConfigAccess->RouteConfig (
                                ConfigAccess,
@@ -4612,8 +4741,8 @@ HiiBlockToConfig (
       *(ConfigElement + (StringPtr - TmpPtr)) = L'&';
     }
     *(ConfigElement + (StringPtr - TmpPtr) + 1) = 0;
-    StrCat (ConfigElement, L"VALUE=");
-    StrCat (ConfigElement, ValueStr);
+    StrCatS (ConfigElement, Length, L"VALUE=");
+    StrCatS (ConfigElement, Length, ValueStr);
 
     AppendToMultiString (Config, ConfigElement);
 
@@ -5130,8 +5259,8 @@ Exit:
     if (*AltCfgResp == NULL) {
       Status = EFI_OUT_OF_RESOURCES;
     } else {
-      StrnCpy (*AltCfgResp, HdrStart, HdrEnd - HdrStart);
-      StrCat (*AltCfgResp, Result);
+      StrnCpyS (*AltCfgResp, Length, HdrStart, HdrEnd - HdrStart);
+      StrCatS (*AltCfgResp, Length, Result);
       Status = EFI_SUCCESS;
     }
   }

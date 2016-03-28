@@ -28,6 +28,7 @@ Module Name:
 #include <Ppi/MfgMemoryTest.h>
 #include <Guid/SetupVariable.h>
 #include <Guid/Vlv2Variable.h>
+#include <Ppi/fTPMPolicy.h>
 
 //
 // Start::Alpine Valley platform
@@ -189,6 +190,118 @@ PeiSmbusExec (
   UINT8 *Length,
   UINT8 *Buffer
   );
+
+
+/**
+
+  Detemine Turbot board 
+  @return 0: Not Turbot board
+          1: Turbot board 
+
+**/
+UINT32 
+DetermineTurbotBoard (
+  void
+  )
+{
+  UINTN PciD31F0RegBase = 0;
+  UINT32 GpioValue = 0;
+  UINT32 TmpVal = 0;
+  UINT32 MmioConf0 = 0;
+  UINT32 MmioPadval = 0;
+  UINT32 PConf0Offset = 0x200; //GPIO_S5_4 pad_conf0 register offset
+  UINT32 PValueOffset = 0x208; //GPIO_S5_4 pad_value register offset
+  UINT32 SSUSOffset = 0x2000;
+  UINT32 IoBase = 0;
+
+  DEBUG ((EFI_D_ERROR, "DetermineTurbotBoard() Entry\n"));
+  PciD31F0RegBase = MmPciAddress (0,
+                      0,
+                      PCI_DEVICE_NUMBER_PCH_LPC,
+                      PCI_FUNCTION_NUMBER_PCH_LPC,
+                      0
+                    );
+  IoBase = MmioRead32 (PciD31F0RegBase + R_PCH_LPC_IO_BASE) & B_PCH_LPC_IO_BASE_BAR;
+  
+  MmioConf0 = IoBase + SSUSOffset + PConf0Offset;
+  MmioPadval = IoBase + SSUSOffset + PValueOffset;
+  //0xFED0E200/0xFED0E208 is pad_Conf/pad_val register address of GPIO_S5_4
+  DEBUG ((EFI_D_ERROR, "MmioConf0[0x%x], MmioPadval[0x%x]\n", MmioConf0, MmioPadval));
+  
+  MmioWrite32 (MmioConf0, 0x2003CC00);  
+
+  TmpVal = MmioRead32 (MmioPadval);
+  TmpVal &= ~0x6; //Clear bit 1:2
+  TmpVal |= 0x2; // Set the pin as GPI
+  MmioWrite32 (MmioPadval, TmpVal); 
+
+  GpioValue = MmioRead32 (MmioPadval);
+
+  DEBUG ((EFI_D_ERROR, "Gpio_S5_4 value is 0x%x\n", GpioValue));
+  return (GpioValue & 0x1);
+}
+
+
+
+EFI_STATUS
+FtpmPolicyInit (
+  IN CONST EFI_PEI_SERVICES             **PeiServices,
+  IN SYSTEM_CONFIGURATION         *pSystemConfiguration
+  )
+{
+  EFI_STATUS                      Status;
+  EFI_PEI_PPI_DESCRIPTOR          *mFtpmPolicyPpiDesc;
+  SEC_FTPM_POLICY_PPI             *mFtpmPolicyPpi;
+
+
+  DEBUG((EFI_D_INFO, "FtpmPolicyInit Entry \n"));
+
+  if (NULL == PeiServices ||  NULL == pSystemConfiguration) {
+    DEBUG((EFI_D_ERROR, "Input error. \n"));
+    return EFI_INVALID_PARAMETER;
+  }
+  
+  Status = (*PeiServices)->AllocatePool(
+                             PeiServices,
+                             sizeof (EFI_PEI_PPI_DESCRIPTOR),
+                             (void **)&mFtpmPolicyPpiDesc
+                             );
+  ASSERT_EFI_ERROR (Status);
+
+  Status = (*PeiServices)->AllocatePool(
+                             PeiServices,
+                             sizeof (SEC_FTPM_POLICY_PPI),
+                             (void **)&mFtpmPolicyPpi
+                             );
+  ASSERT_EFI_ERROR (Status);
+
+  //
+  // Initialize PPI
+  //
+  (*PeiServices)->SetMem ((VOID *)mFtpmPolicyPpi, sizeof (SEC_FTPM_POLICY_PPI), 0);
+  mFtpmPolicyPpiDesc->Flags = EFI_PEI_PPI_DESCRIPTOR_PPI | EFI_PEI_PPI_DESCRIPTOR_TERMINATE_LIST;
+  mFtpmPolicyPpiDesc->Guid = &gSeCfTPMPolicyPpiGuid;
+  mFtpmPolicyPpiDesc->Ppi = mFtpmPolicyPpi;
+
+
+  DEBUG((EFI_D_INFO, "pSystemConfiguration->fTPM = 0x%x \n", pSystemConfiguration->fTPM)); 
+  if(pSystemConfiguration->fTPM == 1) {
+    mFtpmPolicyPpi->fTPMEnable = TRUE;
+  } else {
+    mFtpmPolicyPpi->fTPMEnable = FALSE;
+  }
+
+  Status = (*PeiServices)->InstallPpi(
+                             PeiServices,
+                             mFtpmPolicyPpiDesc
+                             );
+  ASSERT_EFI_ERROR (Status);
+
+  DEBUG((EFI_D_INFO, "FtpmPolicyInit done \n"));
+  
+  return EFI_SUCCESS;
+}
+
 
 /**
   This routine attempts to acquire the SMBus
@@ -654,7 +767,20 @@ PeiInitPlatform (
                        &VariableSize,
                        &SystemConfiguration
 					   );
-  ASSERT_EFI_ERROR(Status);
+  if (EFI_ERROR (Status) || VariableSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VariableSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = Variable->GetVariable(
+              Variable,
+              L"SetupRecovery",
+              &gEfiSetupVariableGuid,
+              NULL,
+              &VariableSize,
+              &SystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+  }
+  
   if (EFI_ERROR (Status)) {
     GGC = ((2 << 3) | 0x200);
     PciCfg16Write(EC_BASE, 0, 2, 0, 0x50, GGC);
@@ -695,6 +821,14 @@ PeiInitPlatform (
     &PlatformInfo,
     sizeof (EFI_PLATFORM_INFO_HOB)
     );
+
+
+#ifdef FTPM_ENABLE
+  Status = FtpmPolicyInit(PeiServices, &SystemConfiguration);
+  if (EFI_ERROR (Status)) {
+    DEBUG((EFI_D_ERROR, "fTPM init failed.\n"));
+  }
+#endif
 
 
   //
@@ -771,6 +905,7 @@ ReadPlatformIds (
     UINTN                           DataSize;
     EFI_PLATFORM_INFO_HOB           TmpHob;
     EFI_PEI_READ_ONLY_VARIABLE2_PPI *PeiVar;
+    UINT32                          CompatibleBoard = 0; 
 
     Status = (**PeiServices).LocatePpi (
                                PeiServices,
@@ -799,9 +934,15 @@ ReadPlatformIds (
       return Status;
     }
 
-
-    PlatformInfoHob->BoardId    = BOARD_ID_MINNOW2;
-    DEBUG ((EFI_D_INFO,  "I'm Minnow2!\n"));
+    CompatibleBoard = DetermineTurbotBoard();
+   if (1 == CompatibleBoard) {
+     PlatformInfoHob->BoardId    = BOARD_ID_MINNOW2_TURBOT;
+     DEBUG ((EFI_D_INFO,  "I'm MinnowBoard Turbot!\n"));
+   } else {       
+     PlatformInfoHob->BoardId    = BOARD_ID_MINNOW2;
+     DEBUG ((EFI_D_INFO,  "I'm MinnowBoard Max!\n"));
+   }
+    
 
     PlatformInfoHob->MemCfgID   = 0;
     PlatformInfoHob->BoardRev   = FabId + 1;	// FabId = 0 means FAB1 (BoardRev = 1), FabId = 1 means FAB2 (BoardRev = 2)...

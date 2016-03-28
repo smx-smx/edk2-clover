@@ -6,7 +6,7 @@
   environment. There are a set of base libraries in the Mde Package that can
   be used to implement base modules.
 
-Copyright (c) 2006 - 2014, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2006 - 2016, Intel Corporation. All rights reserved.<BR>
 Portions copyright (c) 2008 - 2009, Apple Inc. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
@@ -27,6 +27,12 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 //
 #include <ProcessorBind.h>
 
+#if defined(_MSC_EXTENSIONS)
+//
+// Disable warning when last field of data structure is a zero sized array.
+//
+#pragma warning ( disable : 4200 )
+#endif
 
 /**
   Verifies the storage size of a given data type.
@@ -935,6 +941,11 @@ typedef UINTN RETURN_STATUS;
 #define RETURN_COMPROMISED_DATA      ENCODE_ERROR (33)
 
 ///
+/// A HTTP error occurred during the network operation.
+///
+#define RETURN_HTTP_ERROR            ENCODE_ERROR (35)
+
+///
 /// The string contained one or more characters that
 /// the device could not render and were skipped.
 ///
@@ -962,6 +973,12 @@ typedef UINTN RETURN_STATUS;
 /// local policy for this type of data.
 ///
 #define RETURN_WARN_STALE_DATA       ENCODE_WARNING (5)
+
+///
+/// The resulting buffer contains UEFI-compliant file system.
+///
+#define RETURN_WARN_FILE_SYSTEM      ENCODE_WARNING (6)
+
 
 /**
   Returns a 16-bit signature built from 2 ASCII characters.
@@ -1016,7 +1033,7 @@ typedef UINTN RETURN_STATUS;
 #define SIGNATURE_64(A, B, C, D, E, F, G, H) \
     (SIGNATURE_32 (A, B, C, D) | ((UINT64) (SIGNATURE_32 (E, F, G, H)) << 32))
 
-#if defined(_MSC_EXTENSIONS) && !defined (MDE_CPU_EBC)
+#if defined(_MSC_EXTENSIONS) && !defined (__INTEL_COMPILER) && !defined (MDE_CPU_EBC)
   #pragma intrinsic(_ReturnAddress)
   /**
     Get the return address of the calling funcation.

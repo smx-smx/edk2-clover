@@ -1,6 +1,6 @@
 /** @file
   Intel FSP API definition from Intel Firmware Support Package External
-  Architecture Specification, April 2014, revision 001.
+  Architecture Specification v1.1, April 2015, revision 001.
 
   Copyright (c) 2014 - 2015, Intel Corporation. All rights reserved.<BR>
   This program and the accompanying materials
@@ -83,10 +83,19 @@ typedef struct {
   /// User platform configuraiton data region pointer.
   ///
   VOID               *UpdDataRgnPtr;
+  //
+  // Below field is added in FSP EAS v1.1
+  //
+  ///
+  /// The size of memory to be reserved below the top of low usable memory (TOLUM)
+  /// for BootLoader usage. This is optional and value can be zero. If non-zero, the
+  /// size must be a multiple of 4KB.
+  ///
+  UINT32              BootLoaderTolumSize;
   ///
   /// Reserved
   ///
-  UINT32              Reserved[7];
+  UINT32              Reserved[6];
 } FSP_INIT_RT_COMMON_BUFFER;
 
 typedef enum {
@@ -212,7 +221,7 @@ EFI_STATUS
   and defined for each FSP binary. This will be documented in Integration guide with
   each FSP release.
   After FspMemInit completes its execution, it passes the pointer to the HobList and
-  returns to the boot loader from where it was called. Bootloader is responsible to 
+  returns to the boot loader from where it was called. BootLoader is responsible to 
   migrate it's stack and data to Memory.
   FspMemoryInit, TempRamExit and FspSiliconInit APIs provide an alternate method to
   complete the silicon initialization and provides bootloader an opportunity to get

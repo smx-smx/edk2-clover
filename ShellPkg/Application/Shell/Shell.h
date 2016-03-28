@@ -2,7 +2,7 @@
   function definitions for internal to shell functions.
 
   (C) Copyright 2014 Hewlett-Packard Development Company, L.P.<BR>
-  Copyright (c) 2009 - 2015, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2009 - 2016, Intel Corporation. All rights reserved.<BR>
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
   which accompanies this distribution.  The full text of the license may be found at
@@ -29,6 +29,7 @@
 #include <Protocol/EfiShellEnvironment2.h>
 #include <Protocol/EfiShellParameters.h>
 #include <Protocol/BlockIo.h>
+#include <Protocol/HiiPackageList.h>
 
 #include <Library/BaseLib.h>
 #include <Library/UefiApplicationEntryPoint.h>
@@ -47,6 +48,7 @@
 #include <Library/PrintLib.h>
 #include <Library/HandleParsingLib.h>
 #include <Library/FileHandleLib.h>
+#include <Library/UefiHiiServicesLib.h>
 
 #include "ShellParametersProtocol.h"
 #include "ShellProtocol.h"
@@ -55,6 +57,10 @@
 #include "ShellManParser.h"
 #include "ConsoleWrappers.h"
 #include "FileHandleWrappers.h"
+
+extern CONST CHAR16 mNoNestingEnvVarName[];
+extern CONST CHAR16 mNoNestingTrue[];
+extern CONST CHAR16 mNoNestingFalse[];
 
 typedef struct {
   LIST_ENTRY        Link;           ///< Standard linked list handler.
@@ -71,7 +77,8 @@ typedef struct {
   UINT32  NoMap:1;        ///< Was "-nomap"         found on command line.
   UINT32  NoVersion:1;    ///< Was "-noversion"     found on command line.
   UINT32  Delay:1;        ///< Was "-delay[:n]      found on command line
-  UINT32  Exit:1;         ///< Was "-_exit"          found on command line
+  UINT32  Exit:1;         ///< Was "-_exit"         found on command line
+  UINT32  NoNest:1;       ///< Was "-nonest"        found on command line
   UINT32  Reserved:7;     ///< Extra bits
 } SHELL_BITS;
 
@@ -122,15 +129,17 @@ typedef struct {
   BOOLEAN                       HaltOutput;           ///< TRUE to start a CTRL-S halt.
 } SHELL_INFO;
 
-extern SHELL_INFO ShellInfoObject;
+#pragma pack(1)
+///
+/// HII specific Vendor Device Path definition.
+///
+typedef struct {
+  VENDOR_DEVICE_PATH             VendorDevicePath;
+  EFI_DEVICE_PATH_PROTOCOL       End;
+} SHELL_MAN_HII_VENDOR_DEVICE_PATH;
+#pragma pack()
 
-typedef enum {
-  Internal_Command,
-  Script_File_Name,
-  Efi_Application,
-  File_Sys_Change,
-  Unknown_Invalid
-} SHELL_OPERATION_TYPES;
+extern SHELL_INFO ShellInfoObject;
 
 /**
   Converts the command line to it's post-processed form.  this replaces variables and alias' per UEFI Shell spec.
@@ -294,6 +303,25 @@ RunCommand(
   );
 
 /**
+  Function will process and run a command line.
+
+  This will determine if the command line represents an internal shell 
+  command or dispatch an external application.
+
+  @param[in] CmdLine      The command line to parse.
+  @param[out] CommandStatus   The status from the command line.
+
+  @retval EFI_SUCCESS     The command was completed.
+  @retval EFI_ABORTED     The command's operation was aborted.
+**/
+EFI_STATUS
+EFIAPI
+RunShellCommand(
+  IN CONST CHAR16   *CmdLine,
+  OUT EFI_STATUS    *CommandStatus
+  );
+
+/**
   Function determines if the CommandName COULD be a valid command.  It does not determine whether
   this is a valid command.  It only checks for invalid characters.
 
@@ -359,6 +387,40 @@ FindFirstCharacter(
   IN CONST CHAR16 *CharacterList,
   IN CONST CHAR16 EscapeCharacter
   );
+
+/**
+  Cleans off leading and trailing spaces and tabs.
+
+  @param[in] String pointer to the string to trim them off.
+**/
+EFI_STATUS
+EFIAPI
+TrimSpaces(
+  IN CHAR16 **String
+  );
+
+/**
+  
+  Create a new buffer list and stores the old one to OldBufferList  
+
+  @param OldBufferList   The temporary list head used to store the nodes in BufferToFreeList.
+**/
+VOID
+SaveBufferList (
+  OUT LIST_ENTRY     *OldBufferList
+  );
+
+/**
+  Restore previous nodes into BufferToFreeList .
+
+  @param OldBufferList   The temporary list head used to store the nodes in BufferToFreeList.
+**/
+VOID
+RestoreBufferList (
+  IN OUT LIST_ENTRY     *OldBufferList
+  );
+
+
 
 #endif //_SHELL_INTERNAL_HEADER_
 

@@ -1,6 +1,6 @@
 /*++
 
-  Copyright (c) 2004  - 2014, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2004  - 2015, Intel Corporation. All rights reserved.<BR>
                                                                                    
 
   This program and the accompanying materials are licensed and made available under
@@ -1110,7 +1110,7 @@ typedef struct {
   UINT8           GfxBoost;
   UINT8           IgdThermal;
   UINT8           SEC00;
-  UINT8           SEC01;
+  UINT8           fTPM;
   UINT8           SEC02;
   UINT8           SEC03;
   UINT8           MeasuredBootEnable;
@@ -1307,8 +1307,8 @@ typedef struct {
   UINT8  LpssHsuart1FlowControlEnabled;
 
   UINT8   SdCardRemovable; // ACPI reporting MMC/SD media as: removable/non-removable
-  
   UINT8   GpioWakeCapability;
+  UINT8   RtcBattery;
 
 } SYSTEM_CONFIGURATION;
 #pragma pack()

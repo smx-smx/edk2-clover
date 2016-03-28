@@ -13,7 +13,8 @@
   Dp uses this information to group records in different ways.  It also uses
   timer information to calculate elapsed time for each measurement.
  
-  Copyright (c) 2009 - 2012, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2009 - 2015, Intel Corporation. All rights reserved.<BR>
+  (C) Copyright 2015-2016 Hewlett Packard Enterprise Development LP<BR>
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
   which accompanies this distribution.  The full text of the license may be found at
@@ -81,6 +82,7 @@ PARAM_ITEM_LIST  ParamList[] = {
 #endif
   {STRING_TOKEN (STR_DP_OPTION_LX), TypeFlag},   // -x   eXclude Cumulative Items
   {STRING_TOKEN (STR_DP_OPTION_LI), TypeFlag},   // -i   Display Identifier
+  {STRING_TOKEN (STR_DP_OPTION_LC), TypeValue},  // -c   Display cumulative data.
   {STRING_TOKEN (STR_DP_OPTION_LN), TypeValue},  // -n # Number of records to display for A and R
   {STRING_TOKEN (STR_DP_OPTION_LT), TypeValue}   // -t # Threshold of interest
   };
@@ -138,6 +140,7 @@ ShowHelp( void )
   PrintToken (STRING_TOKEN (STR_DP_HELP_THRESHOLD));
   PrintToken (STRING_TOKEN (STR_DP_HELP_COUNT));
   PrintToken (STRING_TOKEN (STR_DP_HELP_ID));
+  PrintToken (STRING_TOKEN (STR_DP_HELP_CUM_DATA));
   PrintToken (STRING_TOKEN (STR_DP_HELP_HELP));
   Print(L"\n");
 }
@@ -168,16 +171,35 @@ DumpStatistics( void )
   FreePool (StringPtrUnknown);
 }
 
-/** 
+/**
+  Initialize the cumulative data.
+
+**/
+VOID
+InitCumulativeData (
+  VOID
+  )
+{
+  UINTN                             Index;
+
+  for (Index = 0; Index < NumCum; ++Index) {
+    CumData[Index].Count = 0;
+    CumData[Index].MinDur = PERF_MAXDUR;
+    CumData[Index].MaxDur = 0;
+    CumData[Index].Duration = 0;
+  }
+}
+
+/**
   Dump performance data.
   
   @param[in]  ImageHandle     The image handle.
   @param[in]  SystemTable     The system table.
-  
+
   @retval EFI_SUCCESS            Command completed successfully.
   @retval EFI_INVALID_PARAMETER  Command usage error.
+  @retval EFI_ABORTED            The user aborts the operation.
   @retval value                  Unknown error.
-  
 **/
 EFI_STATUS
 EFIAPI
@@ -203,6 +225,9 @@ InitializeDp (
   BOOLEAN                   TraceMode;
   BOOLEAN                   ProfileMode;
   BOOLEAN                   ExcludeMode;
+  BOOLEAN                   CumulativeMode;
+  CONST CHAR16              *CustomCumulativeToken;
+  PERF_CUM_DATA             *CustomCumulativeData;
 
   EFI_STRING                StringDpOptionQh;
   EFI_STRING                StringDpOptionLh;
@@ -218,6 +243,7 @@ InitializeDp (
   EFI_STRING                StringDpOptionLn;
   EFI_STRING                StringDpOptionLt;
   EFI_STRING                StringDpOptionLi;
+  EFI_STRING                StringDpOptionLc;
   
   SummaryMode     = FALSE;
   VerboseMode     = FALSE;
@@ -226,6 +252,8 @@ InitializeDp (
   TraceMode       = FALSE;
   ProfileMode     = FALSE;
   ExcludeMode     = FALSE;
+  CumulativeMode = FALSE;
+  CustomCumulativeData = NULL;
 
   StringDpOptionQh = NULL;
   StringDpOptionLh = NULL;
@@ -241,6 +269,7 @@ InitializeDp (
   StringDpOptionLn = NULL;
   StringDpOptionLt = NULL;
   StringDpOptionLi = NULL;
+  StringDpOptionLc = NULL;
   StringPtr        = NULL;
 
   // Get DP's entry time as soon as possible.
@@ -289,6 +318,7 @@ InitializeDp (
       StringDpOptionLn = HiiGetString (gHiiHandle, STRING_TOKEN (STR_DP_OPTION_LN), NULL);
       StringDpOptionLt = HiiGetString (gHiiHandle, STRING_TOKEN (STR_DP_OPTION_LT), NULL);
       StringDpOptionLi = HiiGetString (gHiiHandle, STRING_TOKEN (STR_DP_OPTION_LI), NULL);
+      StringDpOptionLc = HiiGetString (gHiiHandle, STRING_TOKEN (STR_DP_OPTION_LC), NULL);
       
       // Boolean Options
       // 
@@ -303,6 +333,7 @@ InitializeDp (
 #endif  // PROFILING_IMPLEMENTED
       ExcludeMode = ShellCommandLineGetFlag (ParamPackage, StringDpOptionLx);
       mShowId     =  ShellCommandLineGetFlag (ParamPackage, StringDpOptionLi);
+      CumulativeMode = ShellCommandLineGetFlag (ParamPackage, StringDpOptionLc);
 
       // Options with Values
       CmdLineArg  = ShellCommandLineGetValue (ParamPackage, StringDpOptionLn);
@@ -330,6 +361,21 @@ InitializeDp (
         ProfileMode = TRUE;
 #endif  // PROFILING_IMPLEMENTED
       }
+
+  //
+  // Init the custom cumulative data.
+  //
+  CustomCumulativeToken = ShellCommandLineGetValue (ParamPackage, StringDpOptionLc);
+  if (CustomCumulativeToken != NULL) {
+    CustomCumulativeData = AllocateZeroPool (sizeof (PERF_CUM_DATA));
+    ASSERT (CustomCumulativeData != NULL);
+    CustomCumulativeData->MinDur = 0;
+    CustomCumulativeData->MaxDur = 0;
+    CustomCumulativeData->Count  = 0;
+    CustomCumulativeData->Duration = 0;
+    CustomCumulativeData->Name   = AllocateZeroPool (StrLen (CustomCumulativeToken) + 1);
+    UnicodeStrToAsciiStr (CustomCumulativeToken, CustomCumulativeData->Name);
+  }
 
 /****************************************************************************
 ****            Timer specific processing                                ****
@@ -392,10 +438,15 @@ InitializeDp (
 ****    !T &&  P  := (2) Only Profile records are displayed
 ****     T &&  P  := (3) Same as Default, both are displayed
 ****************************************************************************/
-      GatherStatistics();
-      if (AllMode) {
+      GatherStatistics (CustomCumulativeData);
+      if (CumulativeMode) {                       
+        ProcessCumulative (CustomCumulativeData);
+      } else if (AllMode) {
         if (TraceMode) {
-          DumpAllTrace( Number2Display, ExcludeMode);
+          Status = DumpAllTrace( Number2Display, ExcludeMode);
+          if (Status == EFI_ABORTED) {
+            goto Done;
+          }
         }
         if (ProfileMode) {
           DumpAllProfile( Number2Display, ExcludeMode);
@@ -403,7 +454,10 @@ InitializeDp (
       }
       else if (RawMode) {
         if (TraceMode) {
-          DumpRawTrace( Number2Display, ExcludeMode);
+          Status = DumpRawTrace( Number2Display, ExcludeMode);
+          if (Status == EFI_ABORTED) {
+            goto Done;
+          }
         }
         if (ProfileMode) {
           DumpRawProfile( Number2Display, ExcludeMode);
@@ -415,11 +469,21 @@ InitializeDp (
           ProcessPhases ( Ticker );
           if ( ! SummaryMode) {
             Status = ProcessHandles ( ExcludeMode);
-            if ( ! EFI_ERROR( Status)) {
-              ProcessPeims (     );
-              ProcessGlobal (    );
-              ProcessCumulative ();
+            if (Status == EFI_ABORTED) {
+              goto Done;
             }
+
+            Status = ProcessPeims ();
+            if (Status == EFI_ABORTED) {
+              goto Done;
+            }
+
+            Status = ProcessGlobal ();
+            if (Status == EFI_ABORTED) {
+              goto Done;
+            }
+
+            ProcessCumulative (NULL);
           }
         }
         if (ProfileMode) {
@@ -432,6 +496,9 @@ InitializeDp (
     }
   }
 
+Done:
+
+  //
   // Free the memory allocate from HiiGetString
   //
   ListIndex = 0;
@@ -455,8 +522,14 @@ InitializeDp (
   SafeFreePool (StringDpOptionLn);
   SafeFreePool (StringDpOptionLt);
   SafeFreePool (StringDpOptionLi);
+  SafeFreePool (StringDpOptionLc);
   SafeFreePool (StringPtr);
   SafeFreePool (mPrintTokenBuffer);
+
+  if (CustomCumulativeData != NULL) {
+    SafeFreePool (CustomCumulativeData->Name);
+  }
+  SafeFreePool (CustomCumulativeData);
 
   HiiRemovePackages (gHiiHandle);
   return Status;

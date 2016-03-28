@@ -1,7 +1,7 @@
 /** @file
   UEFI Memory pool management functions.
 
-Copyright (c) 2006 - 2014, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2006 - 2016, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
 which accompanies this distribution.  The full text of the license may be found at
@@ -154,10 +154,11 @@ LookupPoolHead (
   }
 
   //
-  // MemoryType values in the range 0x80000000..0xFFFFFFFF are reserved for use by UEFI 
-  // OS loaders that are provided by operating system vendors
+  // MemoryType values in the range 0x80000000..0xFFFFFFFF are reserved for use by UEFI
+  // OS loaders that are provided by operating system vendors.
+  // MemoryType values in the range 0x70000000..0x7FFFFFFF are reserved for OEM use.
   //
-  if ((INT32)MemoryType < 0) {
+  if ((UINT32) MemoryType >= MEMORY_TYPE_OEM_RESERVED_MIN) {
 
     for (Link = mPoolHeadList.ForwardLink; Link != &mPoolHeadList; Link = Link->ForwardLink) {
       Pool = CR(Link, POOL, Link, POOL_SIGNATURE);
@@ -196,7 +197,9 @@ LookupPoolHead (
   @param  Buffer                 The address to return a pointer to the allocated
                                  pool
 
-  @retval EFI_INVALID_PARAMETER  PoolType not valid or Buffer is NULL. 
+  @retval EFI_INVALID_PARAMETER  Buffer is NULL.
+                                 PoolType is in the range EfiMaxMemoryType..0x6FFFFFFF.
+                                 PoolType is EfiPersistentMemory.
   @retval EFI_OUT_OF_RESOURCES   Size exceeds max pool size or allocation failed.
   @retval EFI_SUCCESS            Pool successfully allocated.
 
@@ -214,8 +217,8 @@ CoreInternalAllocatePool (
   //
   // If it's not a valid type, fail it
   //
-  if ((PoolType >= EfiMaxMemoryType && PoolType <= 0x7fffffff) ||
-       PoolType == EfiConventionalMemory) {
+  if ((PoolType >= EfiMaxMemoryType && PoolType < MEMORY_TYPE_OEM_RESERVED_MIN) ||
+       (PoolType == EfiConventionalMemory) || (PoolType == EfiPersistentMemory)) {
     return EFI_INVALID_PARAMETER;
   }
 
@@ -254,7 +257,9 @@ CoreInternalAllocatePool (
   @param  Buffer                 The address to return a pointer to the allocated
                                  pool
 
-  @retval EFI_INVALID_PARAMETER  PoolType not valid or Buffer is NULL. 
+  @retval EFI_INVALID_PARAMETER  Buffer is NULL.
+                                 PoolType is in the range EfiMaxMemoryType..0x6FFFFFFF.
+                                 PoolType is EfiPersistentMemory.
   @retval EFI_OUT_OF_RESOURCES   Size exceeds max pool size or allocation failed.
   @retval EFI_SUCCESS            Pool successfully allocated.
 
@@ -656,11 +661,11 @@ CoreFreePoolI (
   }
 
   //
-  // If this is an OS specific memory type, then check to see if the last
+  // If this is an OS/OEM specific memory type, then check to see if the last
   // portion of that memory type has been freed.  If it has, then free the
   // list entry for that memory type
   //
-  if ((INT32)Pool->MemoryType < 0 && Pool->Used == 0) {
+  if (((UINT32) Pool->MemoryType >= MEMORY_TYPE_OEM_RESERVED_MIN) && Pool->Used == 0) {
     RemoveEntryList (&Pool->Link);
     CoreFreePoolI (Pool);
   }

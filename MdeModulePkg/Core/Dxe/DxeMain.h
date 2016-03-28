@@ -2,7 +2,7 @@
   The internal header file includes the common header files, defines
   internal structure and functions used by DxeCore module.
 
-Copyright (c) 2006 - 2014, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2006 - 2016, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
 which accompanies this distribution.  The full text of the license may be found at
@@ -123,6 +123,31 @@ WITHOUT WARRANTIES OR REPRESENTATIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED.
 /// Define the initial size of the dependency expression evaluation stack
 ///
 #define DEPEX_STACK_SIZE_INCREMENT  0x1000
+
+#if defined (MDE_CPU_IPF)
+///
+/// For Itanium machines make the default allocations 8K aligned
+///
+#define EFI_ACPI_RUNTIME_PAGE_ALLOCATION_ALIGNMENT  (EFI_PAGE_SIZE * 2)
+#define DEFAULT_PAGE_ALLOCATION                     (EFI_PAGE_SIZE * 2)
+
+#elif defined (MDE_CPU_AARCH64)
+///
+/// 64-bit ARM systems allow the OS to execute with 64 KB page size,
+/// so for improved interoperability with the firmware, align the
+/// runtime regions to 64 KB as well
+///
+#define EFI_ACPI_RUNTIME_PAGE_ALLOCATION_ALIGNMENT  (SIZE_64KB)
+#define DEFAULT_PAGE_ALLOCATION                     (EFI_PAGE_SIZE)
+
+#else
+///
+/// For genric EFI machines make the default allocations 4K aligned
+///
+#define EFI_ACPI_RUNTIME_PAGE_ALLOCATION_ALIGNMENT  (EFI_PAGE_SIZE)
+#define DEFAULT_PAGE_ALLOCATION                     (EFI_PAGE_SIZE)
+
+#endif
 
 typedef struct {
   EFI_GUID                    *ProtocolGuid;
@@ -2856,6 +2881,44 @@ CoreUpdateMemoryAttributes (
   IN EFI_PHYSICAL_ADDRESS  Start,
   IN UINT64                NumberOfPages,
   IN UINT64                NewAttributes
+  );
+
+/**
+  Initialize PropertiesTable support.
+**/
+VOID
+EFIAPI
+CoreInitializePropertiesTable (
+  VOID
+  );
+
+/**
+  Initialize MemoryAttrubutesTable support.
+**/
+VOID
+EFIAPI
+CoreInitializeMemoryAttributesTable (
+  VOID
+  );
+
+/**
+  Insert image record.
+
+  @param  RuntimeImage    Runtime image information
+**/
+VOID
+InsertImageRecord (
+  IN EFI_RUNTIME_IMAGE_ENTRY  *RuntimeImage
+  );
+
+/**
+  Remove Image record.
+
+  @param  RuntimeImage    Runtime image information
+**/
+VOID
+RemoveImageRecord (
+  IN EFI_RUNTIME_IMAGE_ENTRY  *RuntimeImage
   );
 
 #endif

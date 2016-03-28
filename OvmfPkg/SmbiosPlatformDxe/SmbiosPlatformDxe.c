@@ -2,7 +2,7 @@
   This driver installs SMBIOS information for OVMF
 
   Copyright (c) 2011, Bei Guan <gbtju85@gmail.com>
-  Copyright (c) 2011, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2011 - 2015, Intel Corporation. All rights reserved.<BR>
 
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
@@ -16,13 +16,17 @@
 
 #include "SmbiosPlatformDxe.h"
 
+#define TYPE0_STRINGS \
+  "EFI Development Kit II / OVMF\0"     /* Vendor */ \
+  "0.0.0\0"                             /* BiosVersion */ \
+  "02/06/2015\0"                        /* BiosReleaseDate */
 //
 // Type definition and contents of the default Type 0 SMBIOS table.
 //
 #pragma pack(1)
 typedef struct {
   SMBIOS_TABLE_TYPE0 Base;
-  UINT8              Strings[];
+  UINT8              Strings[sizeof(TYPE0_STRINGS)];
 } OVMF_TYPE0;
 #pragma pack()
 
@@ -56,45 +60,8 @@ STATIC CONST OVMF_TYPE0 mOvmfDefaultType0 = {
     0xFF   // UINT8                     EmbeddedControllerFirmwareMinorRelease
   },
   // Text strings (unformatted area)
-  "EFI Development Kit II / OVMF\0"     // Vendor
-  "0.0.0\0"                             // BiosVersion
-  "02/06/2015\0"                        // BiosReleaseDate
+  TYPE0_STRINGS
 };
-
-
-/**
-  Validates the SMBIOS entry point structure
-
-  @param  EntryPointStructure  SMBIOS entry point structure
-
-  @retval TRUE   The entry point structure is valid
-  @retval FALSE  The entry point structure is not valid
-
-**/
-BOOLEAN
-IsEntryPointStructureValid (
-  IN SMBIOS_TABLE_ENTRY_POINT  *EntryPointStructure
-  )
-{
-  UINTN                     Index;
-  UINT8                     Length;
-  UINT8                     Checksum;
-  UINT8                     *BytePtr;
-
-  BytePtr = (UINT8*) EntryPointStructure;
-  Length = EntryPointStructure->EntryPointLength;
-  Checksum = 0;
-
-  for (Index = 0; Index < Length; Index++) {
-    Checksum = Checksum + (UINT8) BytePtr[Index];
-  }
-
-  if (Checksum != 0) {
-    return FALSE;
-  } else {
-    return TRUE;
-  }
-}
 
 
 /**

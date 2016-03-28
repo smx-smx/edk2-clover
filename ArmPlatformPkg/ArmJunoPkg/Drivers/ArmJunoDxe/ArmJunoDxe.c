@@ -13,9 +13,12 @@
 **/
 
 #include "ArmJunoDxeInternal.h"
+#include <ArmPlatform.h>
 
 #include <Protocol/DevicePathFromText.h>
+#include <Protocol/PciRootBridgeIo.h>
 
+#include <Guid/EventGroup.h>
 #include <Guid/GlobalVariable.h>
 
 #include <Library/ArmShellCmdLib.h>
@@ -24,77 +27,111 @@
 #include <Library/DevicePathLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiRuntimeServicesTableLib.h>
+#include <Library/IoLib.h>
+#include <Library/PrintLib.h>
+
+//
+// Hardware platform identifiers
+//
+typedef enum {
+  UNKNOWN,
+  JUNO_R0,
+  JUNO_R1
+} JUNO_REVISION;
 
 // This GUID must match the FILE_GUID in ArmPlatformPkg/ArmJunoPkg/AcpiTables/AcpiTables.inf
 STATIC CONST EFI_GUID mJunoAcpiTableFile = { 0xa1dd808e, 0x1e95, 0x4399, { 0xab, 0xc0, 0x65, 0x3c, 0x82, 0xe8, 0x53, 0x0c } };
 
+typedef struct {
+  ACPI_HID_DEVICE_PATH      AcpiDevicePath;
+  PCI_DEVICE_PATH           PciDevicePath;
+  EFI_DEVICE_PATH_PROTOCOL  EndDevicePath;
+} EFI_PCI_ROOT_BRIDGE_DEVICE_PATH;
+
+STATIC CONST EFI_PCI_ROOT_BRIDGE_DEVICE_PATH mPciRootComplexDevicePath = {
+    {
+      { ACPI_DEVICE_PATH,
+        ACPI_DP,
+        { (UINT8) (sizeof (ACPI_HID_DEVICE_PATH)),
+          (UINT8) ((sizeof (ACPI_HID_DEVICE_PATH)) >> 8) }
+      },
+      EISA_PNP_ID (0x0A03),
+      0
+    },
+    {
+      { HARDWARE_DEVICE_PATH,
+        HW_PCI_DP,
+        { (UINT8) (sizeof (PCI_DEVICE_PATH)),
+          (UINT8) ((sizeof (PCI_DEVICE_PATH)) >> 8) }
+      },
+      0,
+      0
+    },
+    {
+      END_DEVICE_PATH_TYPE,
+      END_ENTIRE_DEVICE_PATH_SUBTYPE,
+      { END_DEVICE_PATH_LENGTH, 0 }
+    }
+};
+
+EFI_EVENT mAcpiRegistration = NULL;
+
 /**
- * Build and Set UEFI Variable Boot####
- *
- * @param BootVariableName       Name of the UEFI Variable
- * @param Attributes             'Attributes' for the Boot#### variable as per UEFI spec
- * @param BootDescription        Description of the Boot#### variable
- * @param DevicePath             EFI Device Path of the EFI Application to boot
- * @param OptionalData           Parameters to pass to the EFI application
- * @param OptionalDataSize       Size of the parameters to pass to the EFI application
- *
- * @return EFI_OUT_OF_RESOURCES  A memory allocation failed
- * @return                       Return value of RT.SetVariable
- */
+  Notification function of the event defined as belonging to the
+  EFI_END_OF_DXE_EVENT_GROUP_GUID event group that was created in
+  the entry point of the driver.
+
+  This function is called when an event belonging to the
+  EFI_END_OF_DXE_EVENT_GROUP_GUID event group is signalled. Such an
+  event is signalled once at the end of the dispatching of all
+  drivers (end of the so called DXE phase).
+
+  @param[in]  Event    Event declared in the entry point of the driver whose
+                       notification function is being invoked.
+  @param[in]  Context  NULL
+**/
 STATIC
-EFI_STATUS
-BootOptionCreate (
-  IN  CHAR16                    BootVariableName[9],
-  IN  UINT32                    Attributes,
-  IN  CHAR16*                   BootDescription,
-  IN  EFI_DEVICE_PATH_PROTOCOL* DevicePath,
-  IN  UINT8*                    OptionalData,
-  IN  UINTN                     OptionalDataSize
+VOID
+OnEndOfDxe (
+  IN EFI_EVENT  Event,
+  IN VOID       *Context
   )
 {
-  UINTN                         VariableSize;
-  UINT8                         *Variable;
-  UINT8                         *VariablePtr;
-  UINTN                         FilePathListLength;
-  UINTN                         BootDescriptionSize;
+  EFI_DEVICE_PATH_PROTOCOL* PciRootComplexDevicePath;
+  EFI_HANDLE                Handle;
+  EFI_STATUS                Status;
 
-  FilePathListLength  = GetDevicePathSize (DevicePath);
-  BootDescriptionSize = StrSize (BootDescription);
+  //
+  // PCI Root Complex initialization
+  // At the end of the DXE phase, we should get all the driver dispatched.
+  // Force the PCI Root Complex to be initialized. It allows the OS to skip
+  // this step.
+  //
+  PciRootComplexDevicePath = (EFI_DEVICE_PATH_PROTOCOL*) &mPciRootComplexDevicePath;
+  Status = gBS->LocateDevicePath (&gEfiPciRootBridgeIoProtocolGuid,
+                                  &PciRootComplexDevicePath,
+                                  &Handle);
 
-  // Each Boot#### variable is built as follow:
-  //   UINT32                   Attributes
-  //   UINT16                   FilePathListLength
-  //   CHAR16*                  Description
-  //   EFI_DEVICE_PATH_PROTOCOL FilePathList[]
-  //   UINT8                    OptionalData[]
-  VariableSize = sizeof (UINT32) + sizeof (UINT16) +
-      BootDescriptionSize + FilePathListLength + OptionalDataSize;
-  Variable = AllocateZeroPool (VariableSize);
-  if (Variable == NULL) {
-    return EFI_OUT_OF_RESOURCES;
-  }
+  Status = gBS->ConnectController (Handle, NULL, PciRootComplexDevicePath, FALSE);
+  ASSERT_EFI_ERROR (Status);
+}
 
-  // 'Attributes' field
-  *(UINT32*)Variable = Attributes;
-  // 'FilePathListLength' field
-  VariablePtr = Variable + sizeof (UINT32);
-  *(UINT16*)VariablePtr = FilePathListLength;
-  // 'Description' field
-  VariablePtr += sizeof (UINT16);
-  CopyMem (VariablePtr, BootDescription, BootDescriptionSize);
-  // 'FilePathList' field
-  VariablePtr += BootDescriptionSize;
-  CopyMem (VariablePtr, DevicePath, FilePathListLength);
-  // 'OptionalData' field
-  VariablePtr += FilePathListLength;
-  CopyMem (VariablePtr, OptionalData, OptionalDataSize);
+STATIC
+BOOLEAN
+AcpiTableJunoR0Check (
+  IN  EFI_ACPI_DESCRIPTION_HEADER *AcpiHeader
+  )
+{
+  return TRUE;
+}
 
-  return gRT->SetVariable (
-      BootVariableName,
-      &gEfiGlobalVariableGuid,
-      EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
-      VariableSize, Variable
-      );
+STATIC
+BOOLEAN
+AcpiTableJunoR1Check (
+  IN  EFI_ACPI_DESCRIPTION_HEADER *AcpiHeader
+  )
+{
+  return TRUE;
 }
 
 EFI_STATUS
@@ -112,8 +149,10 @@ ArmJunoEntryPoint (
   UINT32                Midr;
   UINT32                CpuType;
   UINT32                CpuRev;
-  BOOLEAN               IsJunoR1;
+  JUNO_REVISION         JunoRevision;
+  EFI_EVENT             EndOfDxeEvent;
 
+  JunoRevision = UNKNOWN;
   Status = PciEmulationEntryPoint ();
   if (EFI_ERROR (Status)) {
     return Status;
@@ -156,6 +195,22 @@ ArmJunoEntryPoint (
     }
   }
 
+  //
+  // Create an event belonging to the "gEfiEndOfDxeEventGroupGuid" group.
+  // The "OnEndOfDxe()" function is declared as the call back function.
+  // It will be called at the end of the DXE phase when an event of the
+  // same group is signalled to inform about the end of the DXE phase.
+  // Install the INSTALL_FDT_PROTOCOL protocol.
+  //
+  Status = gBS->CreateEventEx (
+                  EVT_NOTIFY_SIGNAL,
+                  TPL_CALLBACK,
+                  OnEndOfDxe,
+                  NULL,
+                  &gEfiEndOfDxeEventGroupGuid,
+                  &EndOfDxeEvent
+                  );
+
   // Install dynamic Shell command to run baremetal binaries.
   Status = ShellDynCmdRunAxfInstall (ImageHandle);
   if (EFI_ERROR (Status)) {
@@ -163,36 +218,63 @@ ArmJunoEntryPoint (
   }
 
   //
-  // Set up the device path to the FDT.
   // We detect whether we are running on a Juno r0 or Juno r1 board at
   // runtime by checking the value of the MIDR register.
   //
 
-  Midr           = ArmReadMidr ();
-  CpuType        = (Midr >> ARM_CPU_TYPE_SHIFT) & ARM_CPU_TYPE_MASK;
-  CpuRev         = Midr & ARM_CPU_REV_MASK;
-  TextDevicePath = NULL;
-  IsJunoR1       = FALSE;
+  Midr     = ArmReadMidr ();
+  CpuType  = (Midr >> ARM_CPU_TYPE_SHIFT) & ARM_CPU_TYPE_MASK;
+  CpuRev   = Midr & ARM_CPU_REV_MASK;
 
   switch (CpuType) {
   case ARM_CPU_TYPE_A53:
     if (CpuRev == ARM_CPU_REV (0, 0)) {
-      TextDevicePath = (CHAR16*)FixedPcdGetPtr (PcdJunoR0FdtDevicePath);
+      JunoRevision = JUNO_R0;
     } else if (CpuRev == ARM_CPU_REV (0, 3)) {
-      TextDevicePath = (CHAR16*)FixedPcdGetPtr (PcdJunoR1A57x2FdtDevicePath);
-      IsJunoR1       = TRUE;
+      JunoRevision = JUNO_R1;
     }
     break;
 
   case ARM_CPU_TYPE_A57:
     if (CpuRev == ARM_CPU_REV (0, 0)) {
-      TextDevicePath = (CHAR16*)FixedPcdGetPtr (PcdJunoR0FdtDevicePath);
+      JunoRevision = JUNO_R0;
     } else if (CpuRev == ARM_CPU_REV (1, 1)) {
-      TextDevicePath = (CHAR16*)FixedPcdGetPtr (PcdJunoR1A57x2FdtDevicePath);
-      IsJunoR1       = TRUE;
+      JunoRevision = JUNO_R1;
     }
   }
 
+  //
+  // Try to install the ACPI Tables
+  //
+  if (JunoRevision == JUNO_R0) {
+    Status = LocateAndInstallAcpiFromFvConditional (&mJunoAcpiTableFile, AcpiTableJunoR0Check);
+  } else if (JunoRevision == JUNO_R1) {
+    Status = LocateAndInstallAcpiFromFvConditional (&mJunoAcpiTableFile, AcpiTableJunoR1Check);
+  }
+  ASSERT_EFI_ERROR (Status);
+
+
+  //
+  // Set the R1 two boot options if not already done.
+  //
+  if (JunoRevision == JUNO_R1) {
+    // Enable PCI enumeration
+    PcdSetBool (PcdPciDisableBusEnumeration, FALSE);
+
+    // Declare the related ACPI Tables
+    EfiCreateProtocolNotifyEvent (
+        &gEfiAcpiTableProtocolGuid,
+        TPL_CALLBACK,
+        AcpiPciNotificationEvent,
+        NULL,
+        &mAcpiRegistration
+        );
+  }
+
+  //
+  // Set up the device path to the FDT.
+  //
+  TextDevicePath = (CHAR16*)FixedPcdGetPtr (PcdJunoFdtDevicePath);
   if (TextDevicePath != NULL) {
     TextDevicePathSize = StrSize (TextDevicePath);
     Buffer = PcdSetPtr (PcdFdtDevicePaths, &TextDevicePathSize, TextDevicePath);
@@ -207,82 +289,6 @@ ArmJunoEntryPoint (
       "ArmJunoDxe: Setting of FDT device path in PcdFdtDevicePaths failed - %r\n", Status)
       );
     return Status;
-  }
-
-  // Try to install the ACPI Tables
-  Status = LocateAndInstallAcpiFromFv (&mJunoAcpiTableFile);
-
-  //
-  // If Juno R1 and it is the first boot then default boot entries will be created
-  //
-  if (IsJunoR1) {
-    CONST CHAR16*                       ExtraBootArgument = L" dtb=juno-r1-ca57x2_ca53x4.dtb";
-    UINTN                               Size;
-    EFI_DEVICE_PATH_FROM_TEXT_PROTOCOL* EfiDevicePathFromTextProtocol;
-    EFI_DEVICE_PATH*                    BootDevicePath;
-    CHAR16*                             DefaultBootArgument;
-    UINTN                               DefaultBootArgumentSize;
-    CHAR16*                             DefaultBootArgument2;
-    UINTN                               DefaultBootArgument2Size;
-    UINT16                              BootOrder[2];
-
-    // Because the driver has a dependency on gEfiVariable(Write)ArchProtocolGuid (see [Depex]
-    // section of the INF file), we know we can safely access the UEFI Variable at that stage.
-    Size = 0;
-    Status = gRT->GetVariable (L"BootOrder", &gEfiGlobalVariableGuid, NULL, &Size, NULL);
-    if (Status == EFI_NOT_FOUND) {
-      Status = gBS->LocateProtocol (&gEfiDevicePathFromTextProtocolGuid, NULL, (VOID **)&EfiDevicePathFromTextProtocol);
-      if (EFI_ERROR (Status)) {
-        // You must provide an implementation of DevicePathFromTextProtocol in your firmware (eg: DevicePathDxe)
-        DEBUG ((EFI_D_ERROR, "Error: Require DevicePathFromTextProtocol\n"));
-        return Status;
-      }
-      // We use the same default kernel
-      BootDevicePath = EfiDevicePathFromTextProtocol->ConvertTextToDevicePath ((CHAR16*)PcdGetPtr (PcdDefaultBootDevicePath));
-
-      // Create the entry if the Default values are correct
-      if (BootDevicePath != NULL) {
-        DefaultBootArgument = (CHAR16*)PcdGetPtr (PcdDefaultBootArgument);
-        DefaultBootArgumentSize = StrSize (DefaultBootArgument);
-        DefaultBootArgument2Size = DefaultBootArgumentSize + StrSize (ExtraBootArgument);
-
-        DefaultBootArgument2 = AllocatePool (DefaultBootArgument2Size);
-        if (DefaultBootArgument2 == NULL) {
-          FreePool (BootDevicePath);
-          return EFI_OUT_OF_RESOURCES;
-        }
-        CopyMem (DefaultBootArgument2, DefaultBootArgument, DefaultBootArgumentSize);
-        CopyMem ((UINT8*)DefaultBootArgument2 + (StrLen (DefaultBootArgument2) * sizeof (CHAR16)), ExtraBootArgument, StrSize (ExtraBootArgument));
-
-        // Create Boot0001 environment variable
-        Status = BootOptionCreate (L"Boot0001", LOAD_OPTION_ACTIVE | LOAD_OPTION_CATEGORY_BOOT,
-            L"Linux with A57x2", BootDevicePath,
-            (UINT8*)DefaultBootArgument, DefaultBootArgumentSize);
-        ASSERT_EFI_ERROR (Status);
-
-        // Create Boot0002 environment variable
-        Status = BootOptionCreate (L"Boot0002", LOAD_OPTION_ACTIVE | LOAD_OPTION_CATEGORY_BOOT,
-            L"Linux with A57x2_A53x4", BootDevicePath,
-            (UINT8*)DefaultBootArgument2, DefaultBootArgument2Size);
-        ASSERT_EFI_ERROR (Status);
-
-        // Add the new Boot Index to the list
-        BootOrder[0] = 1; // Boot0001
-        BootOrder[1] = 2; // Boot0002
-        Status = gRT->SetVariable (
-            L"BootOrder",
-            &gEfiGlobalVariableGuid,
-            EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
-            sizeof (BootOrder),
-            BootOrder
-            );
-
-        FreePool (BootDevicePath);
-        FreePool (DefaultBootArgument2);
-      } else {
-        Status = EFI_UNSUPPORTED;
-      }
-    }
   }
 
   return Status;

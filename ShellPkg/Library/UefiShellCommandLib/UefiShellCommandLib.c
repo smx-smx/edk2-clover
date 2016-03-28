@@ -1,7 +1,7 @@
 /** @file
   Provides interface to shell internal functions for shell commands.
 
-  (C) Copyright 2013-2014 Hewlett-Packard Development Company, L.P.<BR>
+  (C) Copyright 2013-2015 Hewlett-Packard Development Company, L.P.<BR>
   Copyright (c) 2009 - 2014, Intel Corporation. All rights reserved.<BR>
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
@@ -28,6 +28,25 @@ STATIC UINTN                              mProfileListSize;
 STATIC UINTN                              mFsMaxCount = 0;
 STATIC UINTN                              mBlkMaxCount = 0;
 STATIC BUFFER_LIST                        mFileHandleList;
+
+STATIC CONST CHAR8 Hex[] = {
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+  'A',
+  'B',
+  'C',
+  'D',
+  'E',
+  'F'
+};
 
 // global variables required by library class.
 EFI_UNICODE_COLLATION_PROTOCOL    *gUnicodeCollation            = NULL;
@@ -892,7 +911,7 @@ ShellCommandIsOnAliasList(
 }
 
 /**
-  Function to determine current state of ECHO.  Echo determins if lines from scripts
+  Function to determine current state of ECHO.  Echo determines if lines from scripts
   and ECHO commands are enabled.
 
   @retval TRUE    Echo is currently enabled
@@ -908,7 +927,7 @@ ShellCommandGetEchoState(
 }
 
 /**
-  Function to set current state of ECHO.  Echo determins if lines from scripts
+  Function to set current state of ECHO.  Echo determines if lines from scripts
   and ECHO commands are enabled.
 
   If State is TRUE, Echo will be enabled.
@@ -1261,6 +1280,9 @@ ShellCommandCreateInitialMappingsAndPaths(
         ; MapListNode = (SHELL_MAP_LIST *)GetFirstNode(&gShellMapList.Link)
        ){
           RemoveEntryList(&MapListNode->Link);
+          SHELL_FREE_NON_NULL(MapListNode->DevicePath);
+          SHELL_FREE_NON_NULL(MapListNode->MapName);
+          SHELL_FREE_NON_NULL(MapListNode->CurrentDirectoryPath);
           FreePool(MapListNode);
     } // for loop
   }
@@ -1622,7 +1644,6 @@ ShellFileHandleEof(
 
   gEfiShellProtocol->GetFilePosition(Handle, &Pos);
   Info = gEfiShellProtocol->GetFileInfo (Handle);
-  ASSERT(Info != NULL);
   gEfiShellProtocol->SetFilePosition(Handle, Pos);
 
   if (Info == NULL) {
@@ -1671,3 +1692,53 @@ FreeBufferList (
   }
 }
 
+/**
+  Dump some hexadecimal data to the screen.
+
+  @param[in] Indent     How many spaces to indent the output.
+  @param[in] Offset     The offset of the printing.
+  @param[in] DataSize   The size in bytes of UserData.
+  @param[in] UserData   The data to print out.
+**/
+VOID
+DumpHex (
+  IN UINTN        Indent,
+  IN UINTN        Offset,
+  IN UINTN        DataSize,
+  IN VOID         *UserData
+  )
+{
+  UINT8 *Data;
+
+  CHAR8 Val[50];
+
+  CHAR8 Str[20];
+
+  UINT8 TempByte;
+  UINTN Size;
+  UINTN Index;
+
+  Data = UserData;
+  while (DataSize != 0) {
+    Size = 16;
+    if (Size > DataSize) {
+      Size = DataSize;
+    }
+
+    for (Index = 0; Index < Size; Index += 1) {
+      TempByte            = Data[Index];
+      Val[Index * 3 + 0]  = Hex[TempByte >> 4];
+      Val[Index * 3 + 1]  = Hex[TempByte & 0xF];
+      Val[Index * 3 + 2]  = (CHAR8) ((Index == 7) ? '-' : ' ');
+      Str[Index]          = (CHAR8) ((TempByte < ' ' || TempByte > 'z') ? '.' : TempByte);
+    }
+
+    Val[Index * 3]  = 0;
+    Str[Index]      = 0;
+    ShellPrintEx(-1, -1, L"%*a%08X: %-48a *%a*\r\n", Indent, "", Offset, Val, Str);
+
+    Data += Size;
+    Offset += Size;
+    DataSize -= Size;
+  }
+}

@@ -76,7 +76,7 @@ SetFspContinuationFuncParameter (
   );
 
 /**
-  This function changes the Bootloader return address in stack.
+  This function changes the BootLoader return address in stack.
 
   @param[in] ReturnAddress       Address to return.
 
@@ -88,7 +88,7 @@ SetFspApiReturnAddress (
   );
 
 /**
-  This function set the API status code returned to the bootloader.
+  This function set the API status code returned to the BootLoader.
 
   @param[in] ReturnStatus       Status code to return.
 
@@ -158,6 +158,50 @@ GetFspUpdDataPointer (
   );
 
 /**
+  This function sets the memory init UPD data pointer.
+
+  @param[in] MemoryInitUpdPtr   memory init UPD data pointer.
+**/
+VOID
+EFIAPI
+SetFspMemoryInitUpdDataPointer (
+  IN VOID    *MemoryInitUpdPtr
+  );
+
+/**
+  This function gets the memory init UPD data pointer.
+
+  @return memory init UPD data pointer.
+**/
+VOID *
+EFIAPI
+GetFspMemoryInitUpdDataPointer (
+  VOID
+  );
+
+/**
+  This function sets the silicon init UPD data pointer.
+
+  @param[in] SiliconInitUpdPtr   silicon init UPD data pointer.
+**/
+VOID
+EFIAPI
+SetFspSiliconInitUpdDataPointer (
+  IN VOID    *SiliconInitUpdPtr
+  );
+
+/**
+  This function gets the silicon init UPD data pointer.
+
+  @return silicon init UPD data pointer.
+**/
+VOID *
+EFIAPI
+GetFspSiliconInitUpdDataPointer (
+  VOID
+  );
+
+/**
   Set FSP measurement point timestamp.
 
   @param[in] Id       Measurement point ID.
@@ -178,6 +222,28 @@ SetFspMeasurePoint (
 FSP_INFO_HEADER *
 EFIAPI
 GetFspInfoHeader (
+  VOID
+  );
+
+/**
+  This function gets the FSP info header pointer from the API context.
+
+  @retval FspInfoHeader   FSP info header pointer
+**/
+FSP_INFO_HEADER *
+EFIAPI
+GetFspInfoHeaderFromApiContext (
+  VOID
+  );
+
+/**
+  This function gets the VPD data pointer.
+
+  @return VpdDataRgnPtr   VPD data pointer.
+**/
+VOID *
+EFIAPI
+GetFspVpdDataPointer (
   VOID
   );
 

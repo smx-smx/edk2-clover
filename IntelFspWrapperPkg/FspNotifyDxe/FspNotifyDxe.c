@@ -23,6 +23,22 @@
 #include <Library/UefiLib.h>
 #include <Library/FspApiLib.h>
 
+/**
+  Relocate this image under 4G memory.
+
+  @param  ImageHandle  Handle of driver image.
+  @param  SystemTable  Pointer to system table.
+
+  @retval EFI_SUCCESS  Image successfully relocated.
+  @retval EFI_ABORTED  Failed to relocate image.
+
+**/
+EFI_STATUS
+RelocateImageUnder4GIfNeeded (
+  IN EFI_HANDLE           ImageHandle,
+  IN EFI_SYSTEM_TABLE     *SystemTable
+  );
+
 FSP_INFO_HEADER *mFspHeader = NULL;
 
 /**
@@ -120,7 +136,19 @@ FspDxeEntryPoint (
   VOID       *Registration;
   EFI_EVENT  ProtocolNotifyEvent;
 
-  mFspHeader = FspFindFspHeader (PcdGet32 (PcdFlashFvFspBase));
+  //
+  // Load this driver's image to memory
+  //
+  Status = RelocateImageUnder4GIfNeeded (ImageHandle, SystemTable);
+  if (EFI_ERROR (Status)) {
+    return EFI_SUCCESS;
+  }
+
+  if (PcdGet32 (PcdFlashFvSecondFspBase) == 0) {
+    mFspHeader = FspFindFspHeader (PcdGet32 (PcdFlashFvFspBase));
+  } else {
+    mFspHeader = FspFindFspHeader (PcdGet32 (PcdFlashFvSecondFspBase));
+  }
   DEBUG ((DEBUG_INFO, "FspHeader - 0x%x\n", mFspHeader));
   if (mFspHeader == NULL) {
     return EFI_DEVICE_ERROR;

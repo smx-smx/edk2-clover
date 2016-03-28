@@ -19,6 +19,7 @@
   ENTRY_POINT                    = ArmJunoEntryPoint
 
 [Sources.common]
+  AcpiTables.c
   ArmJunoDxe.c
   PciEmulation.c
   PciRootBridgeIo.c
@@ -26,9 +27,11 @@
 [Packages]
   ArmPkg/ArmPkg.dec
   ArmPlatformPkg/ArmPlatformPkg.dec
+  ArmPlatformPkg/ArmVExpressPkg/ArmVExpressPkg.dec
   ArmPlatformPkg/ArmJunoPkg/ArmJuno.dec
   EmbeddedPkg/EmbeddedPkg.dec
   MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
 
 [LibraryClasses]
   AcpiLib
@@ -49,7 +52,6 @@
   UefiDriverEntryPoint
 
 [Guids]
-  gArmGlobalVariableGuid
   gEfiEndOfDxeEventGroupGuid
   gEfiFileInfoGuid
 
@@ -57,7 +59,9 @@
   gEfiBlockIoProtocolGuid
   gEfiDevicePathFromTextProtocolGuid
   gEfiPciIoProtocolGuid
+  gEfiPciRootBridgeIoProtocolGuid
   gEfiSimpleFileSystemProtocolGuid
+  gEfiAcpiTableProtocolGuid
 
 [FixedPcd]
   gArmTokenSpaceGuid.PcdSystemMemoryBase
@@ -69,15 +73,19 @@
   gArmJunoTokenSpaceGuid.PcdSynopsysUsbEhciBaseAddress
   gArmJunoTokenSpaceGuid.PcdSynopsysUsbOhciBaseAddress
 
-  gArmJunoTokenSpaceGuid.PcdJunoR0FdtDevicePath
-  gArmJunoTokenSpaceGuid.PcdJunoR1A57x2FdtDevicePath
-  gArmJunoTokenSpaceGuid.PcdJunoR1A57x2A53x4FdtDevicePath
+  gArmJunoTokenSpaceGuid.PcdJunoFdtDevicePath
 
   gArmPlatformTokenSpaceGuid.PcdDefaultBootDevicePath
   gArmPlatformTokenSpaceGuid.PcdDefaultBootArgument
 
+  # PCI Root complex specific PCDs
+  gArmJunoTokenSpaceGuid.PcdPciConfigurationSpaceBaseAddress
+  gArmPlatformTokenSpaceGuid.PcdPciBusMin
+  gArmPlatformTokenSpaceGuid.PcdPciBusMax
+
 [Pcd]
   gEmbeddedTokenSpaceGuid.PcdFdtDevicePaths
+  gEfiMdeModulePkgTokenSpaceGuid.PcdPciDisableBusEnumeration
 
 [Depex]
   # We depend on these protocols to create the default boot entries

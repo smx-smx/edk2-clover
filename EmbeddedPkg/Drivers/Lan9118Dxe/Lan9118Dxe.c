@@ -14,7 +14,6 @@
 
 #include "Lan9118Dxe.h"
 
-
 typedef struct {
   MAC_ADDR_DEVICE_PATH      Lan9118;
   EFI_DEVICE_PATH_PROTOCOL  End;
@@ -143,7 +142,7 @@ Lan9118DxeEntry (
   // Power up the device so we can find the MAC address
   Status = Lan9118Initialize (Snp);
   if (EFI_ERROR (Status)) {
-    DEBUG ((EFI_D_ERROR, "Lan9118: Error initialising hardware\n"));
+    DEBUG ((EFI_D_ERROR, "LAN9118: Error initialising hardware\n"));
     return EFI_DEVICE_ERROR;
   }
 
@@ -308,8 +307,7 @@ SnpInitialize (
 
   // Write the current configuration to the register
   MmioWrite32 (LAN9118_PMT_CTRL, PmConf);
-  gBS->Stall (LAN9118_STALL);
-  gBS->Stall (LAN9118_STALL);
+  MemoryFence();
 
   // Configure GPIO and HW
   Status = ConfigureHardware (HW_CONF_USE_LEDS, Snp);
@@ -344,7 +342,7 @@ SnpInitialize (
   // Do auto-negotiation if supported
   Status = AutoNegotiate (AUTO_NEGOTIATE_ADVERTISE_ALL, Snp);
   if (EFI_ERROR(Status)) {
-    DEBUG ((EFI_D_WARN, "Lan9118: Auto Negociation not supported.\n"));
+    DEBUG ((EFI_D_WARN, "LAN9118: Auto Negotiation failed.\n"));
   }
 
   // Configure flow control depending on speed capabilities
@@ -432,7 +430,13 @@ SnpReset (
 
   // Write the current configuration to the register
   MmioWrite32 (LAN9118_PMT_CTRL, PmConf);
-  gBS->Stall (LAN9118_STALL);
+  MemoryFence();
+
+  // Reactivate the LEDs
+  Status = ConfigureHardware (HW_CONF_USE_LEDS, Snp);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
 
   // Check that a buffer size was specified in SnpInitialize
   if (gTxBuffer != 0) {
@@ -441,7 +445,7 @@ SnpReset (
     HwConf |= HW_CFG_TX_FIFO_SIZE(gTxBuffer);    // assign size chosen in SnpInitialize
 
     MmioWrite32 (LAN9118_HW_CFG, HwConf);        // Write the conf
-    gBS->Stall (LAN9118_STALL);
+    MemoryFence();
   }
 
   // Enable the receiver and transmitter and clear their contents
@@ -696,7 +700,7 @@ SnpReceiveFilters (
   // Write the options to the MAC_CSR
   //
   IndirectMACWrite32 (INDIRECT_MAC_INDEX_CR, MacCSRValue);
-  gBS->Stall (LAN9118_STALL);
+  MemoryFence();
 
   //
   // If we have to retrieve something, start packet reception.
@@ -763,7 +767,7 @@ SnpStationAddress (
       New = (EFI_MAC_ADDRESS *) PermAddr;
       Lan9118SetMacAddress ((EFI_MAC_ADDRESS *) PermAddr, Snp);
     } else {
-      DEBUG ((EFI_D_ERROR, "Lan9118: Warning: No valid MAC address in EEPROM, using fallback\n"));
+      DEBUG ((EFI_D_ERROR, "LAN9118: Warning: No valid MAC address in EEPROM, using fallback\n"));
       New = (EFI_MAC_ADDRESS*) (FixedPcdGet64 (PcdLan9118DefaultMacAddress));
     }
   } else {
@@ -1062,19 +1066,28 @@ SnpGetStatus (
   if (Interrupts & INSTS_TXE) {
     DEBUG ((EFI_D_ERROR, "LAN9118: Transmitter error. Restarting..."));
 
-    // Initiate a software reset
+    // Software reset, the TXE interrupt is cleared by the reset.
     Status = SoftReset (0, Snp);
     if (EFI_ERROR (Status)) {
       DEBUG ((EFI_D_ERROR, "\n\tSoft Reset Failed: Hardware Error\n"));
       return EFI_DEVICE_ERROR;
     }
 
-    // Acknowledge the TXE
-    MmioWrite32 (LAN9118_INT_STS, INSTS_TXE);
-    gBS->Stall (LAN9118_STALL);
+    // Reactivate the LEDs
+    Status = ConfigureHardware (HW_CONF_USE_LEDS, Snp);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
 
-    // Restart the transmitter
+    //
+    // Restart the transmitter and if necessary the receiver.
+    // Do not ask for FIFO reset as it has already been done
+    // by SoftReset().
+    //
     StartTx (START_TX_MAC | START_TX_CFG, Snp);
+    if (Snp->Mode->ReceiveFilterSetting != 0) {
+      StartRx (0, Snp);
+    }
   }
 
   // Update the media status
@@ -1297,6 +1310,7 @@ SnpReceive (
   )
 {
   LAN9118_DRIVER  *LanDriver;
+  UINT32          IntSts;
   UINT32          RxFifoStatus;
   UINT32          NumPackets;
   UINT32          RxCfgValue;
@@ -1329,6 +1343,27 @@ SnpReceive (
   } else if (Snp->Mode->State == EfiSimpleNetworkStopped) {
     DEBUG ((EFI_D_WARN, "Warning: LAN9118 Driver in stopped state\n"));
     return EFI_NOT_STARTED;
+  }
+
+  //
+  // If the receiver raised the RXE error bit, check if the receiver status
+  // FIFO is full and if not just acknowledge the error. The two other
+  // conditions to get a RXE error are :
+  // . the RX data FIFO is read whereas being empty.
+  // . the RX status FIFO is read whereas being empty.
+  // The RX data and status FIFO are read by this driver only in the following
+  // code of this function. After the readings, the RXE error bit is checked
+  // and if raised, the controller is reset. Thus, at this point, we consider
+  // that the only valid reason to get an RXE error is the receiver status
+  // FIFO being full. And if this is not the case, we consider that this is
+  // a spurious error and we just get rid of it. We experienced such 'spurious'
+  // errors when running the driver on an A57 on Juno. No valid reason to
+  // explain those errors has been found so far and everything seems to
+  // work perfectly when they are just ignored.
+  //
+  IntSts = MmioRead32 (LAN9118_INT_STS);
+  if ((IntSts & INSTS_RXE) && (!(IntSts & INSTS_RSFF))) {
+    MmioWrite32 (LAN9118_INT_STS, INSTS_RXE);
   }
 
   // Count dropped frames
@@ -1397,12 +1432,6 @@ SnpReceive (
   PLength = GET_RXSTATUS_PACKET_LENGTH(RxFifoStatus);
   LanDriver->Stats.RxTotalBytes += (PLength - 4);
 
-  // Check buffer size
-  if (*BuffSize < PLength) {
-    *BuffSize = PLength;
-    return EFI_BUFFER_TOO_SMALL;
-  }
-
   // If padding is applied, read more DWORDs
   if (PLength % 4) {
     Padding = 4 - (PLength % 4);
@@ -1410,6 +1439,12 @@ SnpReceive (
   } else {
     ReadLimit = PLength/4;
     Padding = 0;
+  }
+
+  // Check buffer size
+  if (*BuffSize < (PLength + Padding)) {
+    *BuffSize = PLength + Padding;
+    return EFI_BUFFER_TOO_SMALL;
   }
 
   // Set the amount of data to be transfered out of FIFO for THIS packet
@@ -1438,28 +1473,6 @@ SnpReceive (
     RawData[Count] = MmioRead32 (LAN9118_RX_DATA);
   }
 
-  // Check for Rx errors (worst possible error)
-  if (MmioRead32 (LAN9118_INT_STS) & INSTS_RXE) {
-    DEBUG ((EFI_D_WARN, "Warning: Receiver Error. Restarting...\n"));
-
-    // Initiate a software reset
-    Status = SoftReset (0, Snp);
-    if (EFI_ERROR (Status)) {
-      DEBUG ((EFI_D_ERROR, "Error: Soft Reset Failed: Hardware Error.\n"));
-      return EFI_DEVICE_ERROR;
-    }
-
-    // Acknowledge the RXE
-    MmioWrite32 (LAN9118_INT_STS, INSTS_RXE);
-    gBS->Stall (LAN9118_STALL);
-
-    // Restart the rx (and do not clear FIFO)
-    StartRx (0, Snp);
-
-    // Say that command could not be sent
-    return EFI_DEVICE_ERROR;
-  }
-
   // Get the destination address
   if (DstAddr != NULL) {
     Dst.Addr[0] = (RawData[0] & 0xFF);
@@ -1479,12 +1492,40 @@ SnpReceive (
     Src.Addr[3] = (RawData[2] & 0xFF00) >> 8;
     Src.Addr[4] = (RawData[2] & 0xFF0000) >> 16;
     Src.Addr[5] = (RawData[2] & 0xFF000000) >> 24;
-    CopyMem (SrcAddr,&Src, NET_ETHER_ADDR_LEN);
+    CopyMem (SrcAddr, &Src, NET_ETHER_ADDR_LEN);
   }
 
   // Get the protocol
   if (Protocol != NULL) {
     *Protocol = NTOHS (RawData[3] & 0xFFFF);
+  }
+
+  // Check for Rx errors (worst possible error)
+  if (MmioRead32 (LAN9118_INT_STS) & INSTS_RXE) {
+    DEBUG ((EFI_D_WARN, "Warning: Receiver Error. Restarting...\n"));
+
+    // Software reset, the RXE interrupt is cleared by the reset.
+    Status = SoftReset (0, Snp);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((EFI_D_ERROR, "Error: Soft Reset Failed: Hardware Error.\n"));
+      return EFI_DEVICE_ERROR;
+    }
+
+    // Reactivate the LEDs
+    Status = ConfigureHardware (HW_CONF_USE_LEDS, Snp);
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+
+    //
+    // Restart the receiver and the transmitter without reseting the FIFOs
+    // as it has been done by SoftReset().
+    //
+    StartRx (0, Snp);
+    StartTx (START_TX_MAC | START_TX_CFG, Snp);
+
+    // Say that command could not be sent
+    return EFI_DEVICE_ERROR;
   }
 
 #if defined(EVAL_PERFORMANCE)

@@ -1,6 +1,6 @@
 /** @file
   Intel FSP Info Header definition from Intel Firmware Support Package External
-  Architecture Specification, April 2014, revision 001.
+  Architecture Specification v1.1, April 2015, revision 001.
 
   Copyright (c) 2014 - 2015, Intel Corporation. All rights reserved.<BR>
   This program and the accompanying materials
@@ -28,6 +28,8 @@
 #define  FSP_INFO_HEADER_OFF    0x94
 
 #define  OFFSET_IN_FSP_INFO_HEADER(x)  (UINT32)&((FSP_INFO_HEADER *)(UINTN)0)->x
+
+#define FSP_INFO_HEADER_SIGNATURE  SIGNATURE_32 ('F', 'S', 'P', 'H')
 
 #pragma pack(1)
 
@@ -64,7 +66,7 @@ typedef struct  {
   ///
   UINT32  ImageSize;
   ///
-  /// Byte 0x18: FSP binary preferred base address
+  /// Byte 0x1C: FSP binary preferred base address
   ///
   UINT32  ImageBase;
 
@@ -78,7 +80,7 @@ typedef struct  {
   ///
   UINT32  CfgRegionOffset;
   ///
-  /// Byte 0x24: Size of the FSP configuration region
+  /// Byte 0x28: Size of the FSP configuration region
   ///
   UINT32  CfgRegionSize;
   ///
@@ -103,7 +105,7 @@ typedef struct  {
   UINT32  NotifyPhaseEntryOffset;
 
   ///
-  /// Below field is added in FSP 1.1
+  /// Below fields are added in FSP Revision 2
   ///
 
   ///
@@ -122,19 +124,21 @@ typedef struct  {
 } FSP_INFO_HEADER;
 
 ///
-/// Below structure is added in FSP 1.1
+/// Below structure is added in FSP version 2
 ///
+#define FSP_INFO_EXTENDED_HEADER_SIGNATURE  SIGNATURE_32 ('F', 'S', 'P', 'E')
+
 typedef struct  {
   ///
   /// Byte 0x00: Signature ('FSPE') for the FSP Extended Information Header
   ///
   UINT32  Signature;
   ///
-  /// Byte 0x04: Length of the FSP Extended Header
+  /// Byte 0x04: Length of the table in bytes, including all additional FSP producer defined data.
   ///
-  UINT32  HeaderLength;
+  UINT32  Length;
   ///
-  /// Byte 0x08: Revision of the FSP Extended Header
+  /// Byte 0x08: FSP producer defined revision of the table.
   ///
   UINT8   Revision;
   ///
@@ -142,15 +146,28 @@ typedef struct  {
   ///
   UINT8   Reserved;
   ///
-  /// Byte 0x0A: An OEM-supplied string that defines the OEM
+  /// Byte 0x0A: FSP producer identification string 
   ///
-  CHAR8   OemId[6];
+  CHAR8   FspProducerId[6];
   ///
-  /// Byte 0x10: An OEM-supplied revision number. Larger numbers are assumed to be newer revisions.
+  /// Byte 0x10: FSP producer implementation revision number. Larger numbers are assumed to be newer revisions.
   ///
-  UINT32  OemRevision;
+  UINT32  FspProducerRevision;
+  ///
+  /// Byte 0x14: Size of the FSP producer defined data (n) in bytes.
+  ///
+  UINT32  FspProducerDataSize;
+  ///
+  /// Byte 0x18: FSP producer defined data of size (n) defined by FspProducerDataSize.
+  ///
 
-} FSP_EXTENTED_HEADER;
+} FSP_INFO_EXTENDED_HEADER;
+
+//
+// A generic table search algorithm for additional tables can be implemented with a
+// signature search algorithm until a terminator signature 'FSPP' is found.
+//
+#define FSP_FSPP_SIGNATURE  SIGNATURE_32 ('F', 'S', 'P', 'P')
 
 #pragma pack()
 

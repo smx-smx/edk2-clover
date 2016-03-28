@@ -1,7 +1,7 @@
 /** @file
   DXE Core Main Entry Point
 
-Copyright (c) 2006 - 2015, Intel Corporation. All rights reserved.<BR>
+Copyright (c) 2006 - 2016, Intel Corporation. All rights reserved.<BR>
 This program and the accompanying materials
 are licensed and made available under the terms and conditions of the BSD License
 which accompanies this distribution.  The full text of the license may be found at
@@ -247,6 +247,7 @@ DxeMain (
   EFI_HOB_GUID_TYPE             *GuidHob;
   EFI_VECTOR_HANDOFF_INFO       *VectorInfoList;
   EFI_VECTOR_HANDOFF_INFO       *VectorInfo;
+  VOID                          *EntryPoint;
 
   //
   // Setup the default exception handlers
@@ -290,18 +291,16 @@ DxeMain (
   ASSERT_EFI_ERROR (Status);
 
   //
-  // Call constructor for all libraries
-  //
-  ProcessLibraryConstructorList (gDxeCoreImageHandle, gDxeCoreST);
-  PERF_END   (NULL,"PEI", NULL, 0) ;
-  PERF_START (NULL,"DXE", NULL, 0) ;
-
-  //
   // Report DXE Core image information to the PE/COFF Extra Action Library
   //
   ZeroMem (&ImageContext, sizeof (ImageContext));
-  ImageContext.ImageAddress = (EFI_PHYSICAL_ADDRESS)(UINTN)gDxeCoreLoadedImage->ImageBase;
-  ImageContext.PdbPointer   = PeCoffLoaderGetPdbPointer ((VOID*) (UINTN) ImageContext.ImageAddress);
+  ImageContext.ImageAddress   = (EFI_PHYSICAL_ADDRESS)(UINTN)gDxeCoreLoadedImage->ImageBase;
+  ImageContext.PdbPointer     = PeCoffLoaderGetPdbPointer ((VOID*)(UINTN)ImageContext.ImageAddress);
+  ImageContext.SizeOfHeaders  = PeCoffGetSizeOfHeaders ((VOID*)(UINTN)ImageContext.ImageAddress);
+  Status = PeCoffLoaderGetEntryPoint ((VOID*)(UINTN)ImageContext.ImageAddress, &EntryPoint);
+  if (Status == EFI_SUCCESS) {
+    ImageContext.EntryPoint = (EFI_PHYSICAL_ADDRESS)(UINTN)EntryPoint;
+  }
   PeCoffLoaderRelocateImageExtraAction (&ImageContext);
 
   //
@@ -309,6 +308,13 @@ DxeMain (
   //
   Status = CoreInitializeGcdServices (&HobStart, MemoryBaseAddress, MemoryLength);
   ASSERT_EFI_ERROR (Status);
+
+  //
+  // Call constructor for all libraries
+  //
+  ProcessLibraryConstructorList (gDxeCoreImageHandle, gDxeCoreST);
+  PERF_END   (NULL,"PEI", NULL, 0) ;
+  PERF_START (NULL,"DXE", NULL, 0) ;
 
   //
   // Install the DXE Services Table into the EFI System Tables's Configuration Table
@@ -386,6 +392,9 @@ DxeMain (
   ASSERT_EFI_ERROR (Status);
 
   MemoryProfileInstallProtocol ();
+
+  CoreInitializePropertiesTable ();
+  CoreInitializeMemoryAttributesTable ();
 
   //
   // Get persisted vector hand-off info from GUIDeed HOB again due to HobStart may be updated,

@@ -38,6 +38,7 @@
   UncachedMemoryAllocationLib|Include/Library/UncachedMemoryAllocationLib.h
   DefaultExceptionHandlerLib|Include/Library/DefaultExceptionHandlerLib.h
   ArmDisassemblerLib|Include/Library/ArmDisassemblerLib.h
+  ArmGicArchLib|Include/Library/ArmGicArchLib.h
 
 [Guids.common]
   gArmTokenSpaceGuid       = { 0xBB11ECFE, 0x820F, 0x4968, { 0xBB, 0xA6, 0xF7, 0x6A, 0xFE, 0x30, 0x25, 0x96 } }
@@ -59,7 +60,7 @@
   # On ARM Architecture with the Security Extension, the address for the
   # Vector Table can be mapped anywhere in the memory map. It means we can
   # point the Exception Vector Table to its location in CpuDxe.
-  # By default we copy the Vector Table at  PcdGet32(PcdCpuVectorBaseAddress)
+  # By default we copy the Vector Table at  PcdGet64(PcdCpuVectorBaseAddress)
   gArmTokenSpaceGuid.PcdRelocateVectorTable|TRUE|BOOLEAN|0x00000022
   # Set this PCD to TRUE if the Exception Vector is changed to add debugger support before
   # it has been configured by the CPU DXE
@@ -72,6 +73,12 @@
   # Define if the GICv3 controller should use the GICv2 legacy
   gArmTokenSpaceGuid.PcdArmGicV3WithV2Legacy|FALSE|BOOLEAN|0x00000042
 
+[PcdsFeatureFlag.ARM]
+  # Whether to map normal memory as non-shareable. FALSE is the safe choice, but
+  # TRUE may be appropriate to fix performance problems if you don't care about
+  # hardware coherency (i.e., no virtualization or cache coherent DMA)
+  gArmTokenSpaceGuid.PcdNormalMemoryNonshareableOverride|FALSE|BOOLEAN|0x00000043
+
 [PcdsFixedAtBuild.common]
   gArmTokenSpaceGuid.PcdTrustzoneSupport|FALSE|BOOLEAN|0x00000006
 
@@ -82,9 +89,8 @@
   gArmTokenSpaceGuid.PcdArmUncachedMemoryMask|0x0000000080000000|UINT64|0x00000002
   # This PCD will free the unallocated buffers if their size reach this threshold.
   # We set the default value to 512MB.
-  gArmTokenSpaceGuid.PcdArmFreeUncachedMemorySizeThreshold|0x20000000|UINT64|0x00000043
-  gArmTokenSpaceGuid.PcdArmCacheOperationThreshold|1024|UINT32|0x00000003
-  gArmTokenSpaceGuid.PcdCpuVectorBaseAddress|0xffff0000|UINT32|0x00000004
+  gArmTokenSpaceGuid.PcdArmFreeUncachedMemorySizeThreshold|0x20000000|UINT64|0x00000003
+  gArmTokenSpaceGuid.PcdCpuVectorBaseAddress|0xffff0000|UINT64|0x00000004
   gArmTokenSpaceGuid.PcdCpuResetAddress|0x00000000|UINT32|0x00000005
 
   #
@@ -116,7 +122,6 @@
   #
   # BdsLib
   #
-  gArmTokenSpaceGuid.PcdArmMachineType|0|UINT32|0x0000001E
   # The compressed Linux kernel is expected to be under 128MB from the beginning of the System Memory
   gArmTokenSpaceGuid.PcdArmLinuxKernelMaxOffset|0x08000000|UINT32|0x0000001F
   # Maximum file size for TFTP servers that do not support 'tsize' extension

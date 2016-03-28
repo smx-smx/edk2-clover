@@ -20,10 +20,10 @@
 
 typedef struct  {
    VOID               *DataPtr;
+   UINT32             MicrocodeRegionBase;
+   UINT32             MicrocodeRegionSize;
    UINT32             CodeRegionBase;
    UINT32             CodeRegionSize;
-   UINT32             MicorcodeRegionBase;
-   UINT32             MicorcodeRegionSize;
 } FSP_PLAT_DATA;
 
 #define FSP_GLOBAL_DATA_SIGNATURE  SIGNATURE_32 ('F', 'S', 'P', 'D')
@@ -34,6 +34,8 @@ typedef struct  {
    FSP_PLAT_DATA      PlatformData;
    FSP_INFO_HEADER    *FspInfoHeader;
    VOID               *UpdDataRgnPtr;
+   VOID               *MemoryInitUpdPtr;
+   VOID               *SiliconInitUpdPtr;
    UINT8              ApiMode;
    UINT8              Reserved[3];
    UINT32             PerfIdx;

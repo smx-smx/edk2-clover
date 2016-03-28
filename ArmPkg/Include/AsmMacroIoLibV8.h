@@ -18,64 +18,29 @@
 #ifndef __MACRO_IO_LIBV8_H__
 #define __MACRO_IO_LIBV8_H__
 
-#define SetPrimaryStack(StackTop, GlobalSize, Tmp, Tmp1)  \
-  ands    Tmp, GlobalSize, #15        ;                   \
-  mov     Tmp1, #16                   ;                   \
-  sub     Tmp1, Tmp1, Tmp             ;                   \
-  csel    Tmp, Tmp1, Tmp, ne          ;                   \
-  add     GlobalSize, GlobalSize, Tmp ;                   \
-  sub     sp, StackTop, GlobalSize    ;                   \
-                                      ;                   \
-  mov     Tmp, sp                     ;                   \
-  mov     GlobalSize, #0x0            ;                   \
-_SetPrimaryStackInitGlobals:          ;                   \
-  cmp     Tmp, StackTop               ;                   \
-  b.eq    _SetPrimaryStackEnd         ;                   \
-  str     GlobalSize, [Tmp], #8       ;                   \
-  b       _SetPrimaryStackInitGlobals ;                   \
-_SetPrimaryStackEnd:
-
-// Initialize the Global Variable with '0'
-#define InitializePrimaryStack(GlobalSize, Tmp1, Tmp2) \
-  and     Tmp1, GlobalSize, #15       ;             \
-  mov     Tmp2, #16                   ;             \
-  sub     Tmp2, Tmp2, Tmp1            ;             \
-  add     GlobalSize, GlobalSize, Tmp2 ;            \
-                                      ;             \
-  mov     Tmp1, sp                    ;             \
-  sub     sp, sp, GlobalSize          ;             \
-  mov     GlobalSize, #0x0            ;             \
-_InitializePrimaryStackLoop:          ;             \
-  mov     Tmp2, sp                    ;             \
-  cmp     Tmp1, Tmp2                  ;             \
-  bls     _InitializePrimaryStackEnd  ;             \
-  str     GlobalSize, [Tmp1, #-8]!    ;             \
-  b       _InitializePrimaryStackLoop ;             \
-_InitializePrimaryStackEnd:
-
 // CurrentEL : 0xC = EL3; 8 = EL2; 4 = EL1
 // This only selects between EL1 and EL2, else we die.
 // Provide the Macro with a safe temp xreg to use.
 #define EL1_OR_EL2(SAFE_XREG)        \
         mrs    SAFE_XREG, CurrentEL ;\
         cmp    SAFE_XREG, #0x8      ;\
+        b.gt   .                    ;\
         b.eq   2f                   ;\
-        cmp    SAFE_XREG, #0x4      ;\
-        b.ne   .                    ;// We should never get here
-// EL1 code starts here
+        cbnz   SAFE_XREG, 1f        ;\
+        b      .                    ;// We should never get here
+
 
 // CurrentEL : 0xC = EL3; 8 = EL2; 4 = EL1
 // This only selects between EL1 and EL2 and EL3, else we die.
 // Provide the Macro with a safe temp xreg to use.
 #define EL1_OR_EL2_OR_EL3(SAFE_XREG) \
         mrs    SAFE_XREG, CurrentEL ;\
-        cmp    SAFE_XREG, #0xC      ;\
-        b.eq   3f                   ;\
         cmp    SAFE_XREG, #0x8      ;\
+        b.gt   3f                   ;\
         b.eq   2f                   ;\
-        cmp    SAFE_XREG, #0x4      ;\
-        b.ne   .                    ;// We should never get here
-// EL1 code starts here
+        cbnz   SAFE_XREG, 1f        ;\
+        b      .                    ;// We should never get here
+
 #if defined(__clang__)
 
 // load x0 with _Data

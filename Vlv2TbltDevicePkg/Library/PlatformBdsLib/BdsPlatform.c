@@ -1,6 +1,6 @@
 /** @file
 
-  Copyright (c) 2004  - 2014, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) 2004  - 2015, Intel Corporation. All rights reserved.<BR>
                                                                                    
   This program and the accompanying materials are licensed and made available under
   the terms and conditions of the BSD License that accompanies this distribution.  
@@ -322,7 +322,18 @@ GetGopDevicePath (
                   &VarSize,
                   &mSystemConfiguration
                   );
-  ASSERT_EFI_ERROR (Status);
+  if (EFI_ERROR (Status) || VarSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VarSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = gRT->GetVariable(
+              L"SetupRecovery",
+              &gEfiNormalSetupGuid,
+              NULL,
+              &VarSize,
+              &mSystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+  }    
 
   if(mSystemConfiguration.BootDisplayDevice != 0x0)
   {
@@ -624,7 +635,18 @@ PlatformBdsForceActiveVga (
                   &VarSize,
                   &mSystemConfiguration
                   );
-  ASSERT_EFI_ERROR (Status);
+  if (EFI_ERROR (Status) || VarSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VarSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = gRT->GetVariable(
+              L"SetupRecovery",
+              &gEfiNormalSetupGuid,
+              NULL,
+              &VarSize,
+              &mSystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+  }    
 
 
   if ((PlugInPciVgaDevicePath == NULL && OnboardPciVgaDevicePath != NULL) ) {
@@ -680,7 +702,18 @@ UpdateConsoleResolution(
                   &VarSize,
                   &SystemConfiguration
                   );
-  ASSERT_EFI_ERROR (Status);
+  if (EFI_ERROR (Status) || VarSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VarSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = gRT->GetVariable(
+              L"SetupRecovery",
+              &gEfiNormalSetupGuid,
+              NULL,
+              &VarSize,
+              &SystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+  }  
 
   switch (SystemConfiguration.IgdFlatPanel) {
 
@@ -1576,6 +1609,11 @@ PlatformBdsPolicyBehavior (
   UINTN                              BootOrderSize;
 
   Timeout = PcdGet16 (PcdPlatformBootTimeOut);
+  if (Timeout > 10 ) {
+    //we think the Timeout variable is corrupted
+    Timeout = 10;
+  }
+  	
   VarSize = sizeof(SYSTEM_CONFIGURATION);
   Status = gRT->GetVariable(
                   NORMAL_SETUP_NAME,
@@ -1584,9 +1622,19 @@ PlatformBdsPolicyBehavior (
                   &VarSize,
                   &SystemConfiguration
                   );
-  if (EFI_ERROR (Status)) {
-    return;
-  }
+
+  if (EFI_ERROR (Status) || VarSize != sizeof(SYSTEM_CONFIGURATION)) {
+    //The setup variable is corrupted
+    VarSize = sizeof(SYSTEM_CONFIGURATION);
+    Status = gRT->GetVariable(
+              L"SetupRecovery",
+              &gEfiNormalSetupGuid,
+              NULL,
+              &VarSize,
+              &SystemConfiguration
+              );
+    ASSERT_EFI_ERROR (Status);
+  }  
 
   //
   // Load the driver option as the driver option list
@@ -1763,10 +1811,12 @@ PlatformBdsPolicyBehavior (
     }
 
 
-#ifdef TPM_ENABLED
-       TcgPhysicalPresenceLibProcessRequest();
-#endif
-
+    #ifdef TPM_ENABLED
+    TcgPhysicalPresenceLibProcessRequest();
+    #endif
+    #ifdef FTPM_ENABLE
+    TrEEPhysicalPresenceLibProcessRequest(NULL);
+    #endif
     //
     // Close boot script and install ready to lock
     //
@@ -1951,10 +2001,12 @@ FULL_CONFIGURATION:
         PlatformBdsConnectSequence ();
       }
     }
-#ifdef TPM_ENABLED
+   #ifdef TPM_ENABLED
    TcgPhysicalPresenceLibProcessRequest();
-#endif
-
+   #endif
+   #ifdef FTPM_ENABLE
+   TrEEPhysicalPresenceLibProcessRequest(NULL);
+   #endif
     //
     // Close boot script and install ready to lock
     //

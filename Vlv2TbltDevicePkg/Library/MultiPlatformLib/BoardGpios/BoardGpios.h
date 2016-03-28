@@ -46,33 +46,33 @@ GPIO_INIT_ITEM("PLT_CLK3          GPIOC_99 "     ,TRISTS   ,NA           ,F0    
 #define MINNOW2_GPIO_USE_SEL_VAL_64_70       0x00000000
 #define MINNOW2_GPIO_USE_SEL_VAL_64_70       0x00000000
 #define MINNOW2_GPIO_USE_SEL_VAL_SUS         0x00000000
-#define MINNOW2_GPIO_USE_SEL_VAL_SUS2        0x00000007
+#define MINNOW2_GPIO_USE_SEL_VAL_SUS2        0x00000001
   
 
 #define MINNOW2_GPIO_IO_SEL_VAL_0_31         0x00000000
 #define MINNOW2_GPIO_IO_SEL_VAL_32_63        0x00000000
 #define MINNOW2_GPIO_IO_SEL_VAL_64_70        0x00000000
 #define MINNOW2_GPIO_IO_SEL_VAL_SUS          0x00000000
-#define MINNOW2_GPIO_IO_SEL_VAL_SUS2         0x00000007   
+#define MINNOW2_GPIO_IO_SEL_VAL_SUS2         0x00000001   
 
 
 #define MINNOW2_GPIO_LVL_VAL_0_31            0x00000000
 #define MINNOW2_GPIO_LVL_VAL_32_63           0x00000000
 #define MINNOW2_GPIO_LVL_VAL_64_70           0x00000000
 #define MINNOW2_GPIO_LVL_VAL_SUS             0x00000000
-#define MINNOW2_GPIO_LVL_VAL_SUS2            0x00000007   
+#define MINNOW2_GPIO_LVL_VAL_SUS2            0x00000001   
 
 #define MINNOW2_GPIO_TPE_VAL_0_31            0x00000000
 #define MINNOW2_GPIO_TPE_VAL_SUS             0x00000000
-#define MINNOW2_GPIO_TPE_VAL_SUS2            0x00000007   
+#define MINNOW2_GPIO_TPE_VAL_SUS2            0x00000001   
 
 #define MINNOW2_GPIO_TNE_VAL_0_31            0x00000000
 #define MINNOW2_GPIO_TNE_VAL_SUS             0x00000000
-#define MINNOW2_GPIO_TNE_VAL_SUS2            0x00000007   
+#define MINNOW2_GPIO_TNE_VAL_SUS2            0x00000001  
 
 #define MINNOW2_GPIO_TS_VAL_0_31             0x00000000
 #define MINNOW2_GPIO_TS_VAL_SUS              0x00000000
-#define MINNOW2_GPIO_TS_VAL_SUS2             0x00000007   
+#define MINNOW2_GPIO_TS_VAL_SUS2             0x00000001   
 
 static CFIO_INIT_STRUCT mMinnow2CfioInitData =
 {
@@ -135,9 +135,9 @@ GPIO_INIT_ITEM("HV_DDI0_DDC_SCL   GPIONC_2 "     ,Native   ,NA           ,F2    
 GPIO_INIT_ITEM("PANEL0_VDDEN      GPIONC_3 "     ,GPIO     ,NA           ,F0           ,             ,                ,NONE       ,0x14),
 GPIO_INIT_ITEM("PANEL0_BKLTEN     GPIONC_4 "     ,GPIO     ,NA           ,F0           ,             ,                ,NONE       ,0x15),
 GPIO_INIT_ITEM("PANEL0_BKLTCTL    GPIONC_5 "     ,GPIO     ,NA           ,F0           ,             ,                ,NONE       ,0x16),
-GPIO_INIT_ITEM("HV_DDI1_HPD       GPIONC_6 "     ,GPI      ,NA           ,F0           ,             ,                ,20K_L      ,0x18),
-GPIO_INIT_ITEM("HV_DDI1_DDC_SDA   GPIONC_7 "     ,Native   ,NA           ,F2           ,             ,                ,20K_L      ,0x19),
-GPIO_INIT_ITEM("HV_DDI1_DDC_SCL   GPIONC_8 "     ,GPI      ,NA           ,F0           ,             ,                ,20K_L      ,0x17),
+GPIO_INIT_ITEM("HV_DDI1_HPD       GPIONC_6 "     ,Native   ,NA           ,F2           ,             ,                ,NONE       ,0x18),
+GPIO_INIT_ITEM("HV_DDI1_DDC_SDA   GPIONC_7 "     ,Native   ,NA           ,F2           ,             ,                ,NONE       ,0x19),
+GPIO_INIT_ITEM("HV_DDI1_DDC_SCL   GPIONC_8 "     ,Native   ,NA           ,F2           ,             ,                ,NONE       ,0x17),
 GPIO_INIT_ITEM("PANEL1_VDDEN      GPIONC_9 "     ,GPIO     ,NA           ,F0           ,             ,                ,NONE       ,0x10),
 GPIO_INIT_ITEM("PANEL1_BKLTEN     GPIONC_10"     ,GPIO     ,NA           ,F0           ,             ,                ,NONE       ,0x0e),
 GPIO_INIT_ITEM("PANEL1_BKLTCTL    GPIONC_11"     ,GPIO     ,NA           ,F0           ,             ,                ,NONE       ,0x0f),

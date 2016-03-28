@@ -7,6 +7,7 @@
   DpUtilities.c, DpTrace.c, and DpProfile.c are included here.
 
   Copyright (c) 2009 - 2013, Intel Corporation. All rights reserved.
+  (C) Copyright 2015-2016 Hewlett Packard Enterprise Development LP<BR>
   This program and the accompanying materials
   are licensed and made available under the terms and conditions of the BSD License
   which accompanies this distribution.  The full text of the license may be found at
@@ -96,7 +97,7 @@ IsPhase(
   
 **/
 VOID
-GetShortPdbFileName (
+DpGetShortPdbFileName (
   IN  CHAR8     *PdbFileName,
   OUT CHAR16    *UnicodeBuffer
   );
@@ -118,7 +119,7 @@ GetShortPdbFileName (
   
 **/
 VOID
-GetNameFromHandle (
+DpGetNameFromHandle (
   IN EFI_HANDLE Handle
   );
 
@@ -171,10 +172,13 @@ GetCumulativeItem(
   
   @post The SummaryData and CumData structures contain statistics for the
         current performance logs.
+
+  @param[in, out] CustomCumulativeData  The pointer to the custom cumulative data.
+
 **/
 VOID
 GatherStatistics(
-  VOID
+  IN OUT PERF_CUM_DATA              *CustomCumulativeData OPTIONAL
   );
 
 /** 
@@ -194,8 +198,11 @@ GatherStatistics(
   @param[in]    Limit       The number of records to print.  Zero is ALL.
   @param[in]    ExcludeFlag TRUE to exclude individual Cumulative items from display.
   
+  @retval EFI_SUCCESS           The operation was successful.
+  @retval EFI_ABORTED           The user aborts the operation.
+  @return Others                from a call to gBS->LocateHandleBuffer().
 **/
-VOID
+EFI_STATUS
 DumpAllTrace(
   IN UINTN             Limit,
   IN BOOLEAN           ExcludeFlag
@@ -217,9 +224,10 @@ DumpAllTrace(
   
   @param[in]    Limit       The number of records to print.  Zero is ALL.
   @param[in]    ExcludeFlag TRUE to exclude individual Cumulative items from display.
-  
+  @retval EFI_SUCCESS           The operation was successful.
+  @retval EFI_ABORTED           The user aborts the operation.
 **/
-VOID
+EFI_STATUS
 DumpRawTrace(
   IN UINTN          Limit,
   IN BOOLEAN        ExcludeFlag
@@ -242,7 +250,9 @@ ProcessPhases(
   
   @param[in]    ExcludeFlag   TRUE to exclude individual Cumulative items from display.
   
-  @return       Status from a call to gBS->LocateHandle().
+  @retval EFI_SUCCESS             The operation was successful.
+  @retval EFI_ABORTED             The user aborts the operation.
+  @return Others                  from a call to gBS->LocateHandleBuffer().
 **/
 EFI_STATUS
 ProcessHandles(
@@ -255,8 +265,10 @@ ProcessHandles(
   
   Only prints complete PEIM records
   
+  @retval EFI_SUCCESS           The operation was successful.
+  @retval EFI_ABORTED           The user aborts the operation.
 **/
-VOID
+EFI_STATUS
 ProcessPeims(
   VOID
   );
@@ -269,8 +281,10 @@ ProcessPeims(
   Increment TIndex for every record, even skipped ones, so that we have an
   indication of every measurement record taken.
   
+  @retval EFI_SUCCESS           The operation was successful.
+  @retval EFI_ABORTED           The user aborts the operation.
 **/
-VOID
+EFI_STATUS
 ProcessGlobal(
   VOID
   );
@@ -282,11 +296,13 @@ ProcessGlobal(
   For each record with a Token listed in the CumData array:<BR>
      - Update the instance count and the total, minimum, and maximum durations.
   Finally, print the gathered cumulative statistics.
+
+  @param[in]    CustomCumulativeData  The pointer to the custom cumulative data.
   
 **/
 VOID
 ProcessCumulative(
-  VOID
+  IN PERF_CUM_DATA                  *CustomCumulativeData OPTIONAL
   );
 
 /** 
