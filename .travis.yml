@@ -28,5 +28,6 @@ script:
   - . edksetup.sh BaseTools
   - sed 's/^ACTIVE_PLATFORM.*/ACTIVE_PLATFORM=Clover\/Clover.dsc/g' -i $WORKSPACE/Conf/target.txt
   - sed 's/^TOOL_CHAIN_TAG.*/TOOL_CHAIN_TAG=GCC49/g' -i $WORKSPACE/Conf/target.txt
+  - sed 's/-Werror//g' -i $WORKSPACE/Conf/tools_def.txt
   - build -a IA32
   - build -a X64
